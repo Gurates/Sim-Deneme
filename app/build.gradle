@@ -1,0 +1,49 @@
+plugins {
+    id 'application'
+}
+
+repositories {
+    mavenCentral()
+}
+
+def osName = System.getProperty("os.name").toLowerCase()
+def lwjglNatives
+if (osName.contains("win")) {
+    lwjglNatives = "natives-windows"
+} else if (osName.contains("mac")) {
+    def osArch = System.getProperty("os.arch").toLowerCase()
+    lwjglNatives = osArch.contains("aarch64") ? "natives-macos-arm64" : "natives-macos"
+} else if (osName.contains("nix") || osName.contains("nux") || osName.indexOf("aix") > 0) {
+    def osArch = System.getProperty("os.arch").toLowerCase()
+    lwjglNatives = osArch.contains("aarch64") ? "natives-linux-arm64" : "natives-linux"
+}
+
+dependencies {
+    testImplementation libs.junit.jupiter
+    testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
+
+    implementation libs.guava
+
+    implementation libs.lwjgl
+    implementation libs.lwjgl.glfw
+    implementation libs.lwjgl.opengl
+    runtimeOnly "org.lwjgl:lwjgl:${libs.versions.lwjgl.get()}:$lwjglNatives"
+    runtimeOnly "org.lwjgl:lwjgl-glfw:${libs.versions.lwjgl.get()}:$lwjglNatives"
+    runtimeOnly "org.lwjgl:lwjgl-opengl:${libs.versions.lwjgl.get()}:$lwjglNatives"
+    
+    implementation libs.joml
+}
+
+java {
+    toolchain {
+        languageVersion = JavaLanguageVersion.of(21)
+    }
+}
+
+application {
+    mainClass = 'rsim2.App'
+}
+
+tasks.named('test') {
+    useJUnitPlatform()
+}

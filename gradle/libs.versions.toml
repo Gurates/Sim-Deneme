@@ -1,0 +1,13 @@
+[versions]
+guava = "33.4.6-jre"
+junit-jupiter = "5.12.1"
+lwjgl = "3.3.3"
+joml = "1.10.7"
+
+[libraries]
+guava = { module = "com.google.guava:guava", version.ref = "guava" }
+junit-jupiter = { module = "org.junit.jupiter:junit-jupiter", version.ref = "junit-jupiter" }
+lwjgl = { module = "org.lwjgl:lwjgl", version.ref = "lwjgl" }
+lwjgl-glfw = { module = "org.lwjgl:lwjgl-glfw", version.ref = "lwjgl" }
+lwjgl-opengl = { module = "org.lwjgl:lwjgl-opengl", version.ref = "lwjgl" }
+joml = { module = "org.joml:joml", version.ref = "joml" }
