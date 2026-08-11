@@ -1,5 +1,6 @@
 package rsim2.camera;
 
+import imgui.ImGui;
 import org.joml.Matrix4f;
 import org.joml.Vector3f;
 import rsim2.input.Input;
@@ -23,6 +24,7 @@ public class Camera {
 
     private float mouseSensitivity = 0.2f;
     private float moveSpeed = 5.0f;
+    private float zoomSpeed = 1.5f;
 
     public Camera(float aspectRatio) {
         this.aspectRatio = aspectRatio;
@@ -43,8 +45,24 @@ public class Camera {
     }
 
     public void update(Input input, float deltaTime) {
+        boolean wantCaptureMouse = false;
+        try {
+            wantCaptureMouse = ImGui.getIO().getWantCaptureMouse();
+        } catch (Throwable ignored) {
+        }
+
+        if (wantCaptureMouse) {
+            return;
+        }
+
         float dx = input.getDeltaMouseX() * mouseSensitivity;
         float dy = input.getDeltaMouseY() * mouseSensitivity;
+        float scroll = input.getScrollY();
+
+        if (scroll != 0) {
+            orbitDistance -= scroll * zoomSpeed;
+            orbitDistance = Math.max(1.0f, Math.min(100.0f, orbitDistance));
+        }
 
         if (input.isMouseButtonDown(GLFW_MOUSE_BUTTON_RIGHT)) {
             rotation.y += Math.toRadians(dx);
@@ -59,9 +77,9 @@ public class Camera {
             ).normalize();
 
             Vector3f right = new Vector3f(
-                (float) Math.sin(rotation.y - Math.PI / 2.0),
+                (float) Math.cos(rotation.y),
                 0,
-                (float) -Math.cos(rotation.y - Math.PI / 2.0)
+                (float) Math.sin(rotation.y)
             ).normalize();
 
             if (input.isKeyDown(GLFW_KEY_W)) position.add(forward.mul(moveSpeed * deltaTime));
@@ -70,6 +88,10 @@ public class Camera {
             if (input.isKeyDown(GLFW_KEY_D)) position.add(right.mul(moveSpeed * deltaTime));
             if (input.isKeyDown(GLFW_KEY_SPACE)) position.y += moveSpeed * deltaTime;
             if (input.isKeyDown(GLFW_KEY_LEFT_SHIFT)) position.y -= moveSpeed * deltaTime;
+
+            if (scroll != 0) {
+                position.add(forward.mul(scroll * zoomSpeed));
+            }
             
         } else if (input.isMouseButtonDown(GLFW_MOUSE_BUTTON_LEFT)) {
             rotation.y += Math.toRadians(dx);
@@ -84,7 +106,24 @@ public class Camera {
             float zOffset = (float) (horizontalDistance * Math.cos(-rotation.y));
             
             position.set(orbitTarget.x + xOffset, orbitTarget.y + verticalDistance, orbitTarget.z + zOffset);
+        } else if (scroll != 0) {
+            float horizontalDistance = (float) (orbitDistance * Math.cos(rotation.x));
+            float verticalDistance = (float) (orbitDistance * Math.sin(rotation.x));
+            
+            float xOffset = (float) (horizontalDistance * Math.sin(-rotation.y));
+            float zOffset = (float) (horizontalDistance * Math.cos(-rotation.y));
+            
+            position.set(orbitTarget.x + xOffset, orbitTarget.y + verticalDistance, orbitTarget.z + zOffset);
         }
+    }
+
+    public void setPosition(float x, float y, float z) {
+        position.set(x, y, z);
+    }
+
+    public void resetPosition() {
+        position.set(0, 5, 10);
+        rotation.set((float) Math.toRadians(30), 0, 0);
     }
 
     public Matrix4f getViewMatrix() {

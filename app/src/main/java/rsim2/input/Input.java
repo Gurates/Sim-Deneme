@@ -13,6 +13,9 @@ public class Input {
     private float deltaMouseX;
     private float deltaMouseY;
 
+    private float scrollY;
+    private float accumScrollY;
+
     public void init(long window) {
         glfwSetMouseButtonCallback(window, (windowHandle, button, action, mods) -> {
             if (button < GLFW_MOUSE_BUTTON_LAST) {
@@ -25,6 +28,10 @@ public class Input {
             lastMouseY = mouseY;
             mouseX = xpos;
             mouseY = ypos;
+        });
+
+        glfwSetScrollCallback(window, (windowHandle, xoffset, yoffset) -> {
+            accumScrollY += (float) yoffset;
         });
     }
     
@@ -40,6 +47,9 @@ public class Input {
         
         lastMouseX = mouseX;
         lastMouseY = mouseY;
+
+        scrollY = accumScrollY;
+        accumScrollY = 0;
     }
 
     public boolean isKeyDown(int key) {
@@ -56,5 +66,9 @@ public class Input {
 
     public float getDeltaMouseY() {
         return deltaMouseY;
+    }
+
+    public float getScrollY() {
+        return scrollY;
     }
 }

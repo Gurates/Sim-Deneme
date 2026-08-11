@@ -8,14 +8,27 @@ repositories {
 
 def osName = System.getProperty("os.name").toLowerCase()
 def lwjglNatives
+def imguiNatives
+
 if (osName.contains("win")) {
     lwjglNatives = "natives-windows"
+    imguiNatives = "imgui-java-natives-windows"
 } else if (osName.contains("mac")) {
     def osArch = System.getProperty("os.arch").toLowerCase()
     lwjglNatives = osArch.contains("aarch64") ? "natives-macos-arm64" : "natives-macos"
+    imguiNatives = "imgui-java-natives-macos"
 } else if (osName.contains("nix") || osName.contains("nux") || osName.indexOf("aix") > 0) {
     def osArch = System.getProperty("os.arch").toLowerCase()
     lwjglNatives = osArch.contains("aarch64") ? "natives-linux-arm64" : "natives-linux"
+    imguiNatives = "imgui-java-natives-linux"
+}
+
+configurations.all {
+    resolutionStrategy {
+        force "org.lwjgl:lwjgl:${libs.versions.lwjgl.get()}"
+        force "org.lwjgl:lwjgl-glfw:${libs.versions.lwjgl.get()}"
+        force "org.lwjgl:lwjgl-opengl:${libs.versions.lwjgl.get()}"
+    }
 }
 
 dependencies {
@@ -30,8 +43,12 @@ dependencies {
     runtimeOnly "org.lwjgl:lwjgl:${libs.versions.lwjgl.get()}:$lwjglNatives"
     runtimeOnly "org.lwjgl:lwjgl-glfw:${libs.versions.lwjgl.get()}:$lwjglNatives"
     runtimeOnly "org.lwjgl:lwjgl-opengl:${libs.versions.lwjgl.get()}:$lwjglNatives"
-    
+
     implementation libs.joml
+
+    implementation libs.imgui.binding
+    implementation libs.imgui.lwjgl3
+    runtimeOnly "io.github.spair:${imguiNatives}:${libs.versions.imgui.get()}"
 }
 
 java {

@@ -6,3 +6,4 @@ build
 *.log
 *.class
 .DS_Store
+*.ini

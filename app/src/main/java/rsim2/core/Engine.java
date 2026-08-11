@@ -1,12 +1,18 @@
 package rsim2.core;
 
+import org.joml.Vector3f;
 import org.lwjgl.glfw.GLFWErrorCallback;
 import org.lwjgl.glfw.GLFWVidMode;
 import org.lwjgl.opengl.GL;
 import org.lwjgl.system.MemoryStack;
 import rsim2.camera.Camera;
+import rsim2.graphics.Mesh;
 import rsim2.graphics.Renderer;
 import rsim2.input.Input;
+import rsim2.scene.Joint;
+import rsim2.scene.SceneNode;
+import rsim2.ui.ImGuiLayer;
+import rsim2.ui.InspectorPanel;
 
 import java.nio.IntBuffer;
 
@@ -26,10 +32,21 @@ public class Engine {
     private Renderer renderer;
     private Camera camera;
 
+    private ImGuiLayer imguiLayer;
+    private InspectorPanel inspectorPanel;
+
+    private SceneNode rootNode;
+    private Joint testJoint;
+    private float totalTime = 0.0f;
+
     public void run() {
         System.out.println("Starting Engine...");
         init();
         loop();
+
+        if (imguiLayer != null) {
+            imguiLayer.dispose();
+        }
 
         glfwFreeCallbacks(window);
         glfwDestroyWindow(window);
@@ -85,10 +102,13 @@ public class Engine {
             GLFWVidMode vidmode = glfwGetVideoMode(glfwGetPrimaryMonitor());
 
             if (vidmode != null) {
-                glfwSetWindowPos(
-                        window,
-                        (vidmode.width() - pWidth.get(0)) / 2,
-                        (vidmode.height() - pHeight.get(0)) / 2);
+                try {
+                    glfwSetWindowPos(
+                            window,
+                            (vidmode.width() - pWidth.get(0)) / 2,
+                            (vidmode.height() - pHeight.get(0)) / 2);
+                } catch (Throwable ignored) {
+                }
             }
         }
 
@@ -102,6 +122,9 @@ public class Engine {
         glEnable(GL_BLEND);
         glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
 
+        imguiLayer = new ImGuiLayer();
+        imguiLayer.init(window);
+
         camera = new Camera((float) width / height);
         renderer = new Renderer();
 
@@ -111,6 +134,25 @@ public class Engine {
             e.printStackTrace();
             throw new RuntimeException("Failed to initialize Renderer", e);
         }
+
+        setupTestScene();
+    }
+
+    private void setupTestScene() {
+        Mesh cubeMesh = renderer.getTestMesh();
+
+        SceneNode baseNode = new SceneNode("base", cubeMesh);
+        baseNode.getLocalPosition().set(0.0f, 0.5f, 0.0f);
+
+        SceneNode armNode = new SceneNode("arm", cubeMesh);
+        armNode.getLocalPosition().set(0.0f, 1.5f, 0.0f);
+
+        baseNode.addChild(armNode);
+
+        testJoint = new Joint("joint1", baseNode, armNode, new Vector3f(0.0f, 1.0f, 0.0f));
+        rootNode = baseNode;
+
+        inspectorPanel = new InspectorPanel(baseNode);
     }
 
     private void loop() {
@@ -123,12 +165,26 @@ public class Engine {
             float deltaTime = (now - lastTime) / 1_000_000_000.0f;
             lastTime = now;
 
+            totalTime += deltaTime;
+
+            if (testJoint != null) {
+                float angle = (float) (Math.sin(totalTime * 2.0) * Math.PI / 2.0);
+                testJoint.setAngle(angle);
+            }
+
+            imguiLayer.newFrame();
+
             glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
             input.update();
             camera.update(input, deltaTime);
 
-            renderer.render(camera);
+            renderer.render(camera, rootNode);
+
+            if (inspectorPanel != null) {
+                inspectorPanel.render();
+            }
+            imguiLayer.render();
 
             glfwSwapBuffers(window);
             glfwPollEvents();
