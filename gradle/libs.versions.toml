@@ -4,6 +4,7 @@ junit-jupiter = "5.12.1"
 lwjgl = "3.3.3"
 joml = "1.10.7"
 imgui = "1.90.0"
+gson = "2.10.1"
 
 [libraries]
 guava = { module = "com.google.guava:guava", version.ref = "guava" }
@@ -14,3 +15,4 @@ lwjgl-opengl = { module = "org.lwjgl:lwjgl-opengl", version.ref = "lwjgl" }
 joml = { module = "org.joml:joml", version.ref = "joml" }
 imgui-binding = { module = "io.github.spair:imgui-java-binding", version.ref = "imgui" }
 imgui-lwjgl3 = { module = "io.github.spair:imgui-java-lwjgl3", version.ref = "imgui" }
+gson = { module = "com.google.code.gson:gson", version.ref = "gson" }

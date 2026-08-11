@@ -11,6 +11,7 @@ import java.util.List;
 public class SceneNode {
     private String id;
     private Mesh mesh;
+    private String sourceMeshPath;
     private final Vector3f localPosition;
     private final Quaternionf localRotation;
     private SceneNode parent;
@@ -58,6 +59,14 @@ public class SceneNode {
 
     public void setMesh(Mesh mesh) {
         this.mesh = mesh;
+    }
+
+    public String getSourceMeshPath() {
+        return sourceMeshPath;
+    }
+
+    public void setSourceMeshPath(String sourceMeshPath) {
+        this.sourceMeshPath = sourceMeshPath;
     }
 
     public Vector3f getLocalPosition() {

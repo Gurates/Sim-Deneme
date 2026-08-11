@@ -49,6 +49,8 @@ dependencies {
     implementation libs.imgui.binding
     implementation libs.imgui.lwjgl3
     runtimeOnly "io.github.spair:${imguiNatives}:${libs.versions.imgui.get()}"
+
+    implementation libs.gson
 }
 
 java {
@@ -59,6 +61,10 @@ java {
 
 application {
     mainClass = 'rsim2.App'
+}
+
+tasks.named('run') {
+    workingDir = rootProject.projectDir
 }
 
 tasks.named('test') {

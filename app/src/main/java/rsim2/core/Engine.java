@@ -6,15 +6,20 @@ import org.lwjgl.glfw.GLFWVidMode;
 import org.lwjgl.opengl.GL;
 import org.lwjgl.system.MemoryStack;
 import rsim2.camera.Camera;
+import rsim2.data.RobotDefinitionDTO;
 import rsim2.graphics.Mesh;
 import rsim2.graphics.Renderer;
 import rsim2.input.Input;
+import rsim2.io.RobotJsonIO;
 import rsim2.scene.Joint;
 import rsim2.scene.SceneNode;
 import rsim2.ui.ImGuiLayer;
 import rsim2.ui.InspectorPanel;
 
+import java.io.File;
 import java.nio.IntBuffer;
+import java.util.ArrayList;
+import java.util.List;
 
 import static org.lwjgl.glfw.Callbacks.glfwFreeCallbacks;
 import static org.lwjgl.glfw.GLFW.*;
@@ -36,7 +41,7 @@ public class Engine {
     private InspectorPanel inspectorPanel;
 
     private SceneNode rootNode;
-    private Joint testJoint;
+    private List<Joint> joints = new ArrayList<>();
     private float totalTime = 0.0f;
 
     public void run() {
@@ -135,24 +140,57 @@ public class Engine {
             throw new RuntimeException("Failed to initialize Renderer", e);
         }
 
-        setupTestScene();
+        setupScene();
     }
 
-    private void setupTestScene() {
+    private void setupScene() {
+        File jsonFile = new File("robot.json");
+        if (jsonFile.exists()) {
+            try {
+                System.out.println("Loading scene from robot.json...");
+                RobotDefinitionDTO dto = RobotJsonIO.load("robot.json");
+                RobotJsonIO.SceneGraphResult res = RobotJsonIO.toSceneGraph(dto);
+                this.rootNode = res.rootNode;
+                this.joints = res.joints;
+            } catch (Exception e) {
+                e.printStackTrace();
+                createDefaultScene();
+            }
+        } else {
+            createDefaultScene();
+        }
+
+        if (rootNode != null) {
+            inspectorPanel = new InspectorPanel(rootNode);
+        }
+    }
+
+    private void createDefaultScene() {
+        System.out.println("Creating default scene and exporting to robot.json...");
         Mesh cubeMesh = renderer.getTestMesh();
 
         SceneNode baseNode = new SceneNode("base", cubeMesh);
+        baseNode.setSourceMeshPath("models/test.obj");
         baseNode.getLocalPosition().set(0.0f, 0.5f, 0.0f);
 
         SceneNode armNode = new SceneNode("arm", cubeMesh);
+        armNode.setSourceMeshPath("models/test.obj");
         armNode.getLocalPosition().set(0.0f, 1.5f, 0.0f);
 
         baseNode.addChild(armNode);
 
-        testJoint = new Joint("joint1", baseNode, armNode, new Vector3f(0.0f, 1.0f, 0.0f));
-        rootNode = baseNode;
+        Joint joint1 = new Joint("joint1", baseNode, armNode, new Vector3f(0.0f, 1.0f, 0.0f));
 
-        inspectorPanel = new InspectorPanel(baseNode);
+        this.rootNode = baseNode;
+        this.joints = new ArrayList<>();
+        this.joints.add(joint1);
+
+        try {
+            RobotDefinitionDTO dto = RobotJsonIO.fromSceneGraph(baseNode, joints, "RSimRobot");
+            RobotJsonIO.save(dto, "robot.json");
+        } catch (Exception e) {
+            e.printStackTrace();
+        }
     }
 
     private void loop() {
@@ -167,9 +205,11 @@ public class Engine {
 
             totalTime += deltaTime;
 
-            if (testJoint != null) {
+            if (joints != null && !joints.isEmpty()) {
                 float angle = (float) (Math.sin(totalTime * 2.0) * Math.PI / 2.0);
-                testJoint.setAngle(angle);
+                for (Joint j : joints) {
+                    j.setAngle(angle);
+                }
             }
 
             imguiLayer.newFrame();

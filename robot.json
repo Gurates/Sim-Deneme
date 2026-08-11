@@ -1,0 +1,48 @@
+{
+  "schemaVersion": "1.0",
+  "robotName": "RSimRobot",
+  "metadata": {
+    "author": "RSim2",
+    "description": "Exported robot definition"
+  },
+  "links": [
+    {
+      "id": "base",
+      "mesh": "models/test.obj",
+      "mass": 1.0
+    },
+    {
+      "id": "arm",
+      "mesh": "models/test.obj",
+      "mass": 1.0
+    }
+  ],
+  "joints": [
+    {
+      "id": "joint1",
+      "type": "revolute",
+      "parent": "base",
+      "child": "arm",
+      "axis": [
+        0.0,
+        1.0,
+        0.0
+      ],
+      "originPosition": [
+        0.0,
+        1.5,
+        0.0
+      ],
+      "limits": {
+        "min": -3.14,
+        "max": 3.14,
+        "maxSpeed": 10.0
+      },
+      "motor": {
+        "type": "servo",
+        "maxTorque": 100.0
+      }
+    }
+  ],
+  "sensors": []
+}
