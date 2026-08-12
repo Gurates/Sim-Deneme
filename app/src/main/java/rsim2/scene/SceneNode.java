@@ -14,6 +14,7 @@ public class SceneNode {
     private String sourceMeshPath;
     private final Vector3f localPosition;
     private final Quaternionf localRotation;
+    private final Vector3f localScale;
     private SceneNode parent;
     private final List<SceneNode> children;
 
@@ -26,11 +27,12 @@ public class SceneNode {
         this.mesh = mesh;
         this.localPosition = new Vector3f();
         this.localRotation = new Quaternionf();
+        this.localScale = new Vector3f(1.0f, 1.0f, 1.0f);
         this.children = new ArrayList<>();
     }
 
     public Matrix4f getLocalTransform() {
-        return new Matrix4f().translationRotate(localPosition, localRotation);
+        return new Matrix4f().translationRotateScale(localPosition, localRotation, localScale);
     }
 
     public Matrix4f getWorldTransform() {
@@ -43,6 +45,23 @@ public class SceneNode {
     public void addChild(SceneNode child) {
         child.setParent(this);
         children.add(child);
+    }
+
+    public boolean removeChild(SceneNode child) {
+        if (child != null && children.remove(child)) {
+            child.setParent(null);
+            return true;
+        }
+        return false;
+    }
+
+    public void cleanup() {
+        if (mesh != null) {
+            mesh.cleanup();
+        }
+        for (SceneNode child : children) {
+            child.cleanup();
+        }
     }
 
     public String getId() {
@@ -75,6 +94,10 @@ public class SceneNode {
 
     public Quaternionf getLocalRotation() {
         return localRotation;
+    }
+
+    public Vector3f getLocalScale() {
+        return localScale;
     }
 
     public SceneNode getParent() {

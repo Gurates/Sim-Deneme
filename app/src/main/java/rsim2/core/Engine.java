@@ -1,5 +1,6 @@
 package rsim2.core;
 
+import imgui.ImGui;
 import org.joml.Vector3f;
 import org.lwjgl.glfw.GLFWErrorCallback;
 import org.lwjgl.glfw.GLFWVidMode;
@@ -7,14 +8,14 @@ import org.lwjgl.opengl.GL;
 import org.lwjgl.system.MemoryStack;
 import rsim2.camera.Camera;
 import rsim2.data.RobotDefinitionDTO;
-import rsim2.graphics.Mesh;
+import rsim2.editor.Picker;
+import rsim2.editor.SelectionManager;
 import rsim2.graphics.Renderer;
 import rsim2.input.Input;
 import rsim2.io.RobotJsonIO;
 import rsim2.scene.Joint;
 import rsim2.scene.SceneNode;
-import rsim2.ui.ImGuiLayer;
-import rsim2.ui.InspectorPanel;
+import rsim2.ui.*;
 
 import java.io.File;
 import java.nio.IntBuffer;
@@ -38,11 +39,15 @@ public class Engine {
     private Camera camera;
 
     private ImGuiLayer imguiLayer;
+    private SelectionManager selectionManager;
+    private ToolbarPanel toolbarPanel;
+    private HierarchyPanel hierarchyPanel;
     private InspectorPanel inspectorPanel;
+    private JointToolPanel jointToolPanel;
 
     private SceneNode rootNode;
     private List<Joint> joints = new ArrayList<>();
-    private float totalTime = 0.0f;
+    private String currentProjectPath = null;
 
     public void run() {
         System.out.println("Starting Engine...");
@@ -144,53 +149,81 @@ public class Engine {
     }
 
     private void setupScene() {
-        File jsonFile = new File("robot.json");
-        if (jsonFile.exists()) {
-            try {
-                System.out.println("Loading scene from robot.json...");
-                RobotDefinitionDTO dto = RobotJsonIO.load("robot.json");
-                RobotJsonIO.SceneGraphResult res = RobotJsonIO.toSceneGraph(dto);
-                this.rootNode = res.rootNode;
-                this.joints = res.joints;
-            } catch (Exception e) {
-                e.printStackTrace();
-                createDefaultScene();
-            }
-        } else {
-            createDefaultScene();
-        }
+        selectionManager = new SelectionManager();
+        rootNode = new SceneNode("world");
+        joints = new ArrayList<>();
+        currentProjectPath = null;
 
-        if (rootNode != null) {
-            inspectorPanel = new InspectorPanel(rootNode);
-        }
+        toolbarPanel = new ToolbarPanel(this, rootNode, selectionManager);
+        hierarchyPanel = new HierarchyPanel(rootNode, selectionManager);
+        inspectorPanel = new InspectorPanel(selectionManager);
+        jointToolPanel = new JointToolPanel(this, rootNode, joints);
     }
 
-    private void createDefaultScene() {
-        System.out.println("Creating default scene and exporting to robot.json...");
-        Mesh cubeMesh = renderer.getTestMesh();
-
-        SceneNode baseNode = new SceneNode("base", cubeMesh);
-        baseNode.setSourceMeshPath("models/test.obj");
-        baseNode.getLocalPosition().set(0.0f, 0.5f, 0.0f);
-
-        SceneNode armNode = new SceneNode("arm", cubeMesh);
-        armNode.setSourceMeshPath("models/test.obj");
-        armNode.getLocalPosition().set(0.0f, 1.5f, 0.0f);
-
-        baseNode.addChild(armNode);
-
-        Joint joint1 = new Joint("joint1", baseNode, armNode, new Vector3f(0.0f, 1.0f, 0.0f));
-
-        this.rootNode = baseNode;
-        this.joints = new ArrayList<>();
-        this.joints.add(joint1);
-
+    public void loadProject(String filePath) {
         try {
-            RobotDefinitionDTO dto = RobotJsonIO.fromSceneGraph(baseNode, joints, "RSimRobot");
-            RobotJsonIO.save(dto, "robot.json");
+            System.out.println("Loading project from: " + filePath);
+            RobotDefinitionDTO dto = RobotJsonIO.load(filePath);
+
+            File jsonFile = new File(filePath);
+            String jsonDir = jsonFile.getParentFile() != null ? jsonFile.getParentFile().getAbsolutePath() : "";
+
+            RobotJsonIO.SceneGraphResult res = RobotJsonIO.toSceneGraph(dto, jsonDir);
+
+            if (this.rootNode != null) {
+                this.rootNode.cleanup();
+            }
+
+            this.rootNode = res.rootNode != null ? res.rootNode : new SceneNode("world");
+            this.joints = res.joints != null ? res.joints : new ArrayList<>();
+            this.currentProjectPath = filePath;
+
+            if (selectionManager != null) {
+                selectionManager.clearSelection();
+            }
+            if (hierarchyPanel != null) {
+                hierarchyPanel.setRootNode(this.rootNode);
+            }
+            if (toolbarPanel != null) {
+                toolbarPanel.setRootNode(this.rootNode);
+            }
+            if (jointToolPanel != null) {
+                jointToolPanel.setRootNode(this.rootNode);
+                jointToolPanel.setJoints(this.joints);
+            }
         } catch (Exception e) {
             e.printStackTrace();
         }
+    }
+
+    public void saveProject(String filePath) {
+        try {
+            System.out.println("Saving project to: " + filePath);
+            File jsonFile = new File(filePath);
+            String jsonDir = jsonFile.getParentFile() != null ? jsonFile.getParentFile().getAbsolutePath() : "";
+
+            RobotDefinitionDTO dto = RobotJsonIO.fromSceneGraph(rootNode, joints, "RSimRobot", jsonDir);
+            RobotJsonIO.save(dto, filePath);
+            this.currentProjectPath = filePath;
+        } catch (Exception e) {
+            e.printStackTrace();
+        }
+    }
+
+    public String getCurrentProjectPath() {
+        return currentProjectPath;
+    }
+
+    public void setCurrentProjectPath(String currentProjectPath) {
+        this.currentProjectPath = currentProjectPath;
+    }
+
+    public SceneNode getRootNode() {
+        return rootNode;
+    }
+
+    public List<Joint> getJoints() {
+        return joints;
     }
 
     private void loop() {
@@ -203,26 +236,43 @@ public class Engine {
             float deltaTime = (now - lastTime) / 1_000_000_000.0f;
             lastTime = now;
 
-            totalTime += deltaTime;
-
-            if (joints != null && !joints.isEmpty()) {
-                float angle = (float) (Math.sin(totalTime * 2.0) * Math.PI / 2.0);
-                for (Joint j : joints) {
-                    j.setAngle(angle);
-                }
-            }
-
             imguiLayer.newFrame();
 
             glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
             input.update();
+
+            if (input.isKeyPressed(GLFW_KEY_DELETE)) {
+                SceneNode selected = selectionManager != null ? selectionManager.getSelected() : null;
+                if (selected != null && selected.getParent() != null) {
+                    selected.getParent().removeChild(selected);
+                    selectionManager.clearSelection();
+                    selected.cleanup();
+                }
+            }
+
+            if (input.isMouseButtonClicked(GLFW_MOUSE_BUTTON_LEFT) && !ImGui.getIO().getWantCaptureMouse()) {
+                SceneNode picked = Picker.pick(input.getMouseX(), input.getMouseY(), width, height, camera, rootNode);
+                if (picked != null) {
+                    selectionManager.select(picked);
+                }
+            }
+
             camera.update(input, deltaTime);
 
             renderer.render(camera, rootNode);
 
+            if (toolbarPanel != null) {
+                toolbarPanel.render();
+            }
+            if (hierarchyPanel != null) {
+                hierarchyPanel.render();
+            }
             if (inspectorPanel != null) {
                 inspectorPanel.render();
+            }
+            if (jointToolPanel != null) {
+                jointToolPanel.render();
             }
             imguiLayer.render();
 

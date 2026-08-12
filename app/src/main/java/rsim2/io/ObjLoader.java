@@ -3,13 +3,27 @@ package rsim2.io;
 import org.joml.Vector3f;
 import rsim2.graphics.Mesh;
 
-import java.io.BufferedReader;
-import java.io.InputStream;
-import java.io.InputStreamReader;
+import java.io.*;
 import java.nio.charset.StandardCharsets;
 import java.util.*;
 
 public class ObjLoader {
+
+    public static InputStream getInputStream(String path) throws Exception {
+        File file = new File(path);
+        if (file.exists() && file.isFile()) {
+            return new FileInputStream(file);
+        }
+        InputStream in = ObjLoader.class.getResourceAsStream(path);
+        if (in != null) {
+            return in;
+        }
+        if (!path.startsWith("/")) {
+            in = ObjLoader.class.getResourceAsStream("/" + path);
+            if (in != null) return in;
+        }
+        throw new FileNotFoundException("Could not find file or resource: " + path);
+    }
 
     public static Mesh load(String resourcePath) throws Exception {
         List<Vector3f> rawPositions = new ArrayList<>();
@@ -21,11 +35,7 @@ public class ObjLoader {
 
         Map<String, Integer> vertexMap = new HashMap<>();
 
-        try (InputStream in = ObjLoader.class.getResourceAsStream(resourcePath)) {
-            if (in == null) {
-                throw new Exception("Resource not found: " + resourcePath);
-            }
-
+        try (InputStream in = getInputStream(resourcePath)) {
             BufferedReader reader = new BufferedReader(new InputStreamReader(in, StandardCharsets.UTF_8));
             String line;
 
@@ -48,7 +58,7 @@ public class ObjLoader {
                     rawNormals.add(new Vector3f(x, y, z));
                 } else if (tokens[0].equals("f")) {
                     List<String> faceTokens = new ArrayList<>(Arrays.asList(tokens).subList(1, tokens.length));
-                    
+
                     if (faceTokens.size() == 3) {
                         processVertexToken(faceTokens.get(0), rawPositions, rawNormals, vertexMap, finalPositions, finalNormals, finalIndices);
                         processVertexToken(faceTokens.get(1), rawPositions, rawNormals, vertexMap, finalPositions, finalNormals, finalIndices);

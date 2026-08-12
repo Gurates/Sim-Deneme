@@ -4,12 +4,14 @@ public class LinkDTO {
     public String id;
     public String mesh;
     public float mass;
+    public float[] scale;
 
     public LinkDTO() {}
 
-    public LinkDTO(String id, String mesh, float mass) {
+    public LinkDTO(String id, String mesh, float mass, float[] scale) {
         this.id = id;
         this.mesh = mesh;
         this.mass = mass;
+        this.scale = scale;
     }
 }

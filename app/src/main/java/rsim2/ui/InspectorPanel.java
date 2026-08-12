@@ -1,41 +1,47 @@
 package rsim2.ui;
 
 import imgui.ImGui;
+import imgui.flag.ImGuiCol;
 import imgui.flag.ImGuiCond;
 import imgui.flag.ImGuiTreeNodeFlags;
 import imgui.flag.ImGuiWindowFlags;
 import imgui.type.ImFloat;
 import org.joml.Vector3f;
+import rsim2.editor.SelectionManager;
 import rsim2.scene.SceneNode;
 
 public class InspectorPanel {
-    private SceneNode targetNode;
+    private final SelectionManager selectionManager;
     private final ImFloat valX = new ImFloat();
     private final ImFloat valY = new ImFloat();
     private final ImFloat valZ = new ImFloat();
+    private final ImFloat valScale = new ImFloat();
 
-    public InspectorPanel(SceneNode targetNode) {
-        this.targetNode = targetNode;
-    }
-
-    public void setTargetNode(SceneNode targetNode) {
-        this.targetNode = targetNode;
+    public InspectorPanel(SelectionManager selectionManager) {
+        this.selectionManager = selectionManager;
     }
 
     public void render() {
-        if (targetNode == null) return;
-
         float displayWidth = ImGui.getIO().getDisplaySizeX();
         float displayHeight = ImGui.getIO().getDisplaySizeY();
         float panelWidth = 300.0f;
+        float topOffsetY = 40.0f;
 
-        ImGui.setNextWindowPos(displayWidth - panelWidth, 0.0f, ImGuiCond.Always);
-        ImGui.setNextWindowSize(panelWidth, displayHeight, ImGuiCond.Always);
+        ImGui.setNextWindowPos(displayWidth - panelWidth, topOffsetY, ImGuiCond.Always);
+        ImGui.setNextWindowSize(panelWidth, displayHeight - topOffsetY, ImGuiCond.Always);
 
         int flags = ImGuiWindowFlags.NoMove | ImGuiWindowFlags.NoResize | ImGuiWindowFlags.NoCollapse;
 
-        String windowTitle = "Robot Inspector (" + targetNode.getId() + ")";
+        SceneNode targetNode = selectionManager != null ? selectionManager.getSelected() : null;
+
+        String windowTitle = targetNode != null ? "Inspector (" + targetNode.getId() + ")" : "Inspector";
         ImGui.begin(windowTitle, flags);
+
+        if (targetNode == null) {
+            ImGui.textDisabled("No object selected.");
+            ImGui.end();
+            return;
+        }
 
         Vector3f pos = targetNode.getLocalPosition();
         valX.set(pos.x);
@@ -74,6 +80,48 @@ public class InspectorPanel {
             if (ImGui.button("Reset Position", -1.0f, 28.0f)) {
                 targetNode.getLocalPosition().set(0.0f, 0.5f, 0.0f);
             }
+        }
+
+        ImGui.spacing();
+
+        Vector3f scale = targetNode.getLocalScale();
+        valScale.set(scale.x);
+
+        if (ImGui.collapsingHeader("Scale", ImGuiTreeNodeFlags.DefaultOpen)) {
+            ImGui.text("Scale");
+            ImGui.sameLine(50.0f);
+            ImGui.setNextItemWidth(-1.0f);
+            if (ImGui.inputFloat("##scale", valScale, 0.05f, 0.5f, "%.3f")) {
+                float newScale = Math.max(0.001f, valScale.get());
+                targetNode.getLocalScale().set(newScale, newScale, newScale);
+            }
+
+            ImGui.spacing();
+            if (ImGui.button("Reset Scale", -1.0f, 28.0f)) {
+                targetNode.getLocalScale().set(1.0f, 1.0f, 1.0f);
+            }
+        }
+
+        ImGui.spacing();
+        ImGui.separator();
+        ImGui.spacing();
+
+        if (targetNode.getParent() != null) {
+            ImGui.pushStyleColor(ImGuiCol.Button, 0.85f, 0.25f, 0.25f, 1.0f);
+            ImGui.pushStyleColor(ImGuiCol.ButtonHovered, 0.95f, 0.35f, 0.35f, 1.0f);
+            ImGui.pushStyleColor(ImGuiCol.ButtonActive, 0.70f, 0.15f, 0.15f, 1.0f);
+            ImGui.pushStyleColor(ImGuiCol.Text, 1.0f, 1.0f, 1.0f, 1.0f);
+
+            if (ImGui.button("Delete Object", -1.0f, 32.0f)) {
+                SceneNode parent = targetNode.getParent();
+                if (parent != null) {
+                    parent.removeChild(targetNode);
+                    selectionManager.clearSelection();
+                    targetNode.cleanup();
+                }
+            }
+
+            ImGui.popStyleColor(4);
         }
 
         ImGui.end();

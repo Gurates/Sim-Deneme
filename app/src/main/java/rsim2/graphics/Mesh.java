@@ -1,5 +1,6 @@
 package rsim2.graphics;
 
+import org.joml.Vector3f;
 import org.lwjgl.BufferUtils;
 
 import java.nio.FloatBuffer;
@@ -16,9 +17,22 @@ public class Mesh {
     private final int vboNormals;
     private final int ebo;
     private final int vertexCount;
+    private final Vector3f minBound;
+    private final Vector3f maxBound;
 
     public Mesh(float[] vertices, float[] normals, int[] indices) {
         this.vertexCount = indices.length;
+
+        minBound = new Vector3f(Float.MAX_VALUE, Float.MAX_VALUE, Float.MAX_VALUE);
+        maxBound = new Vector3f(-Float.MAX_VALUE, -Float.MAX_VALUE, -Float.MAX_VALUE);
+
+        for (int i = 0; i < vertices.length; i += 3) {
+            float x = vertices[i];
+            float y = vertices[i + 1];
+            float z = vertices[i + 2];
+            minBound.min(new Vector3f(x, y, z));
+            maxBound.max(new Vector3f(x, y, z));
+        }
 
         vao = glGenVertexArrays();
         glBindVertexArray(vao);
@@ -60,6 +74,14 @@ public class Mesh {
         glBindVertexArray(vao);
         glDrawElements(GL_TRIANGLES, vertexCount, GL_UNSIGNED_INT, 0);
         glBindVertexArray(0);
+    }
+
+    public Vector3f getMinBound() {
+        return minBound;
+    }
+
+    public Vector3f getMaxBound() {
+        return maxBound;
     }
 
     public void cleanup() {

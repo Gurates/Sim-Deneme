@@ -28,6 +28,7 @@ configurations.all {
         force "org.lwjgl:lwjgl:${libs.versions.lwjgl.get()}"
         force "org.lwjgl:lwjgl-glfw:${libs.versions.lwjgl.get()}"
         force "org.lwjgl:lwjgl-opengl:${libs.versions.lwjgl.get()}"
+        force "org.lwjgl:lwjgl-tinyfd:${libs.versions.lwjgl.get()}"
     }
 }
 
@@ -40,9 +41,11 @@ dependencies {
     implementation libs.lwjgl
     implementation libs.lwjgl.glfw
     implementation libs.lwjgl.opengl
+    implementation libs.lwjgl.tinyfd
     runtimeOnly "org.lwjgl:lwjgl:${libs.versions.lwjgl.get()}:$lwjglNatives"
     runtimeOnly "org.lwjgl:lwjgl-glfw:${libs.versions.lwjgl.get()}:$lwjglNatives"
     runtimeOnly "org.lwjgl:lwjgl-opengl:${libs.versions.lwjgl.get()}:$lwjglNatives"
+    runtimeOnly "org.lwjgl:lwjgl-tinyfd:${libs.versions.lwjgl.get()}:$lwjglNatives"
 
     implementation libs.joml
 

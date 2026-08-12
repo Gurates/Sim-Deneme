@@ -1,7 +1,6 @@
 package rsim2.io;
 
-import com.google.gson.Gson;
-import com.google.gson.GsonBuilder;
+import com.google.gson.*;
 import org.joml.Vector3f;
 import rsim2.data.*;
 import rsim2.graphics.Mesh;
@@ -9,6 +8,7 @@ import rsim2.scene.Joint;
 import rsim2.scene.SceneNode;
 
 import java.io.*;
+import java.lang.reflect.Type;
 import java.nio.charset.StandardCharsets;
 import java.util.*;
 
@@ -20,8 +20,44 @@ public class RobotJsonIO {
         public Map<String, SceneNode> nodesById = new HashMap<>();
     }
 
+    private static Gson createGson() {
+        return new GsonBuilder()
+                .setPrettyPrinting()
+                .registerTypeAdapter(float[].class, new FloatArrayAdapter())
+                .create();
+    }
+
+    private static class FloatArrayAdapter implements JsonDeserializer<float[]>, JsonSerializer<float[]> {
+        @Override
+        public float[] deserialize(JsonElement json, Type typeOfT, JsonDeserializationContext context) throws JsonParseException {
+            if (json.isJsonPrimitive() && json.getAsJsonPrimitive().isNumber()) {
+                float val = json.getAsFloat();
+                return new float[]{ val, val, val };
+            } else if (json.isJsonArray()) {
+                JsonArray arr = json.getAsJsonArray();
+                float[] res = new float[arr.size()];
+                for (int i = 0; i < arr.size(); i++) {
+                    res[i] = arr.get(i).getAsFloat();
+                }
+                return res;
+            }
+            return new float[]{ 1.0f, 1.0f, 1.0f };
+        }
+
+        @Override
+        public JsonElement serialize(float[] src, Type typeOfSrc, JsonSerializationContext context) {
+            JsonArray arr = new JsonArray();
+            if (src != null) {
+                for (float f : src) {
+                    arr.add(f);
+                }
+            }
+            return arr;
+        }
+    }
+
     public static void save(RobotDefinitionDTO def, String filePath) throws Exception {
-        Gson gson = new GsonBuilder().setPrettyPrinting().create();
+        Gson gson = createGson();
         String jsonStr = gson.toJson(def);
         try (Writer writer = new OutputStreamWriter(new FileOutputStream(filePath), StandardCharsets.UTF_8)) {
             writer.write(jsonStr);
@@ -29,13 +65,17 @@ public class RobotJsonIO {
     }
 
     public static RobotDefinitionDTO load(String filePath) throws Exception {
-        Gson gson = new Gson();
+        Gson gson = createGson();
         try (Reader reader = new InputStreamReader(new FileInputStream(filePath), StandardCharsets.UTF_8)) {
             return gson.fromJson(reader, RobotDefinitionDTO.class);
         }
     }
 
     public static RobotDefinitionDTO fromSceneGraph(SceneNode root, List<Joint> joints, String robotName) {
+        return fromSceneGraph(root, joints, robotName, null);
+    }
+
+    public static RobotDefinitionDTO fromSceneGraph(SceneNode root, List<Joint> joints, String robotName, String jsonFileDirectory) {
         RobotDefinitionDTO dto = new RobotDefinitionDTO();
         dto.schemaVersion = "1.0";
         dto.robotName = robotName;
@@ -47,8 +87,17 @@ public class RobotJsonIO {
         for (SceneNode node : allNodes) {
             LinkDTO link = new LinkDTO();
             link.id = node.getId();
-            link.mesh = node.getSourceMeshPath() != null ? node.getSourceMeshPath() : "models/test.obj";
+
+            String rawMeshPath = node.getSourceMeshPath() != null ? node.getSourceMeshPath() : "models/test.obj";
+            if (jsonFileDirectory != null && !jsonFileDirectory.isEmpty()) {
+                link.mesh = makeRelativePath(jsonFileDirectory, rawMeshPath);
+            } else {
+                link.mesh = rawMeshPath;
+            }
+
             link.mass = 1.0f;
+            Vector3f scale = node.getLocalScale();
+            link.scale = new float[]{ scale.x, scale.y, scale.z };
             dto.links.add(link);
         }
 
@@ -59,7 +108,7 @@ public class RobotJsonIO {
                 jDto.type = "revolute";
                 jDto.parent = j.getParentNode() != null ? j.getParentNode().getId() : "";
                 jDto.child = j.getChildNode() != null ? j.getChildNode().getId() : "";
-                
+
                 Vector3f axis = j.getAxis();
                 jDto.axis = new float[]{ axis.x, axis.y, axis.z };
 
@@ -76,6 +125,23 @@ public class RobotJsonIO {
         return dto;
     }
 
+    private static String makeRelativePath(String jsonDir, String targetPath) {
+        try {
+            File targetFile = new File(targetPath);
+            if (!targetFile.isAbsolute()) {
+                return targetPath.replace('\\', '/');
+            }
+            File jsonDirFile = new File(jsonDir);
+            java.nio.file.Path base = jsonDirFile.toPath().toAbsolutePath();
+            java.nio.file.Path target = targetFile.toPath().toAbsolutePath();
+            if (base.getRoot() != null && base.getRoot().equals(target.getRoot())) {
+                return base.relativize(target).toString().replace('\\', '/');
+            }
+        } catch (Exception ignored) {
+        }
+        return targetPath.replace('\\', '/');
+    }
+
     private static void collectNodes(SceneNode node, List<SceneNode> list) {
         if (node == null) return;
         list.add(node);
@@ -85,6 +151,10 @@ public class RobotJsonIO {
     }
 
     public static SceneGraphResult toSceneGraph(RobotDefinitionDTO def) throws Exception {
+        return toSceneGraph(def, null);
+    }
+
+    public static SceneGraphResult toSceneGraph(RobotDefinitionDTO def, String jsonFileDirectory) throws Exception {
         SceneGraphResult result = new SceneGraphResult();
 
         if (def == null || def.links == null) {
@@ -92,14 +162,24 @@ public class RobotJsonIO {
         }
 
         for (LinkDTO link : def.links) {
-            String resourcePath = link.mesh;
-            if (!resourcePath.startsWith("/")) {
-                resourcePath = "/" + resourcePath;
+            String meshPath = link.mesh;
+            String resolvedMeshPath = resolveMeshPath(meshPath, jsonFileDirectory);
+
+            Mesh mesh;
+            String lower = resolvedMeshPath.toLowerCase();
+            if (lower.endsWith(".stl")) {
+                mesh = StlLoader.load(resolvedMeshPath);
+            } else {
+                mesh = ObjLoader.load(resolvedMeshPath);
             }
 
-            Mesh mesh = ObjLoader.load(resourcePath);
             SceneNode node = new SceneNode(link.id, mesh);
-            node.setSourceMeshPath(link.mesh);
+            node.setSourceMeshPath(resolvedMeshPath);
+
+            if (link.scale != null && link.scale.length >= 3) {
+                node.getLocalScale().set(link.scale[0], link.scale[1], link.scale[2]);
+            }
+
             result.nodesById.put(link.id, node);
         }
 
@@ -133,5 +213,25 @@ public class RobotJsonIO {
         }
 
         return result;
+    }
+
+    private static String resolveMeshPath(String meshPath, String jsonFileDirectory) {
+        if (meshPath == null || meshPath.isEmpty()) {
+            return "models/test.obj";
+        }
+
+        File directFile = new File(meshPath);
+        if (directFile.isAbsolute() && directFile.exists()) {
+            return directFile.getAbsolutePath();
+        }
+
+        if (jsonFileDirectory != null && !jsonFileDirectory.isEmpty()) {
+            File relFile = new File(jsonFileDirectory, meshPath);
+            if (relFile.exists()) {
+                return relFile.getAbsolutePath();
+            }
+        }
+
+        return meshPath;
     }
 }

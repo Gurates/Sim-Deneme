@@ -12,6 +12,7 @@ junit-jupiter = { module = "org.junit.jupiter:junit-jupiter", version.ref = "jun
 lwjgl = { module = "org.lwjgl:lwjgl", version.ref = "lwjgl" }
 lwjgl-glfw = { module = "org.lwjgl:lwjgl-glfw", version.ref = "lwjgl" }
 lwjgl-opengl = { module = "org.lwjgl:lwjgl-opengl", version.ref = "lwjgl" }
+lwjgl-tinyfd = { module = "org.lwjgl:lwjgl-tinyfd", version.ref = "lwjgl" }
 joml = { module = "org.joml:joml", version.ref = "joml" }
 imgui-binding = { module = "io.github.spair:imgui-java-binding", version.ref = "imgui" }
 imgui-lwjgl3 = { module = "io.github.spair:imgui-java-lwjgl3", version.ref = "imgui" }

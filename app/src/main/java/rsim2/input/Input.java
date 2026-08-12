@@ -4,8 +4,13 @@ import static org.lwjgl.glfw.GLFW.*;
 
 public class Input {
     private final boolean[] keys = new boolean[GLFW_KEY_LAST];
+    private final boolean[] lastKeys = new boolean[GLFW_KEY_LAST];
+    private final boolean[] keysPressed = new boolean[GLFW_KEY_LAST];
+
     private final boolean[] mouseButtons = new boolean[GLFW_MOUSE_BUTTON_LAST];
-    
+    private final boolean[] lastMouseButtons = new boolean[GLFW_MOUSE_BUTTON_LAST];
+    private final boolean[] mouseButtonsClicked = new boolean[GLFW_MOUSE_BUTTON_LAST];
+
     private double mouseX;
     private double mouseY;
     private double lastMouseX;
@@ -18,7 +23,7 @@ public class Input {
 
     public void init(long window) {
         glfwSetMouseButtonCallback(window, (windowHandle, button, action, mods) -> {
-            if (button < GLFW_MOUSE_BUTTON_LAST) {
+            if (button >= 0 && button < GLFW_MOUSE_BUTTON_LAST) {
                 mouseButtons[button] = action != GLFW_RELEASE;
             }
         });
@@ -34,7 +39,7 @@ public class Input {
             accumScrollY += (float) yoffset;
         });
     }
-    
+
     public void invokeKey(int key, int action) {
         if (key >= 0 && key < GLFW_KEY_LAST) {
             keys[key] = action != GLFW_RELEASE;
@@ -42,9 +47,19 @@ public class Input {
     }
 
     public void update() {
+        for (int i = 0; i < GLFW_KEY_LAST; i++) {
+            keysPressed[i] = keys[i] && !lastKeys[i];
+            lastKeys[i] = keys[i];
+        }
+
+        for (int i = 0; i < GLFW_MOUSE_BUTTON_LAST; i++) {
+            mouseButtonsClicked[i] = mouseButtons[i] && !lastMouseButtons[i];
+            lastMouseButtons[i] = mouseButtons[i];
+        }
+
         deltaMouseX = (float) (mouseX - lastMouseX);
         deltaMouseY = (float) (mouseY - lastMouseY);
-        
+
         lastMouseX = mouseX;
         lastMouseY = mouseY;
 
@@ -56,8 +71,24 @@ public class Input {
         return keys[key];
     }
 
+    public boolean isKeyPressed(int key) {
+        return keysPressed[key];
+    }
+
     public boolean isMouseButtonDown(int button) {
         return mouseButtons[button];
+    }
+
+    public boolean isMouseButtonClicked(int button) {
+        return mouseButtonsClicked[button];
+    }
+
+    public float getMouseX() {
+        return (float) mouseX;
+    }
+
+    public float getMouseY() {
+        return (float) mouseY;
     }
 
     public float getDeltaMouseX() {
