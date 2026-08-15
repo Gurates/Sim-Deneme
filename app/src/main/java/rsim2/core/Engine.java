@@ -48,6 +48,8 @@ public class Engine {
     private SceneNode rootNode;
     private List<Joint> joints = new ArrayList<>();
     private String currentProjectPath = null;
+    private long lastAutoSaveTime = 0;
+    private String lastAutoSaveMessage = "";
 
     public void run() {
         System.out.println("Starting Engine...");
@@ -156,8 +158,8 @@ public class Engine {
 
         toolbarPanel = new ToolbarPanel(this, rootNode, selectionManager);
         hierarchyPanel = new HierarchyPanel(rootNode, selectionManager);
-        inspectorPanel = new InspectorPanel(selectionManager);
-        jointToolPanel = new JointToolPanel(this, rootNode, joints);
+        inspectorPanel = new InspectorPanel(selectionManager, joints);
+        jointToolPanel = new JointToolPanel(this, rootNode, joints, this::autoSaveProject);
     }
 
     public void loadProject(String filePath) {
@@ -187,6 +189,9 @@ public class Engine {
             if (toolbarPanel != null) {
                 toolbarPanel.setRootNode(this.rootNode);
             }
+            if (inspectorPanel != null) {
+                inspectorPanel.setJoints(this.joints);
+            }
             if (jointToolPanel != null) {
                 jointToolPanel.setRootNode(this.rootNode);
                 jointToolPanel.setJoints(this.joints);
@@ -205,8 +210,27 @@ public class Engine {
             RobotDefinitionDTO dto = RobotJsonIO.fromSceneGraph(rootNode, joints, "RSimRobot", jsonDir);
             RobotJsonIO.save(dto, filePath);
             this.currentProjectPath = filePath;
+            this.lastAutoSaveTime = System.currentTimeMillis();
+            this.lastAutoSaveMessage = "Kaydedildi";
         } catch (Exception e) {
             e.printStackTrace();
+        }
+    }
+
+    public void autoSaveProject() {
+        if (currentProjectPath != null && !currentProjectPath.trim().isEmpty()) {
+            try {
+                System.out.println("Auto-saving project to: " + currentProjectPath);
+                File jsonFile = new File(currentProjectPath);
+                String jsonDir = jsonFile.getParentFile() != null ? jsonFile.getParentFile().getAbsolutePath() : "";
+
+                RobotDefinitionDTO dto = RobotJsonIO.fromSceneGraph(rootNode, joints, "RSimRobot", jsonDir);
+                RobotJsonIO.save(dto, currentProjectPath);
+                this.lastAutoSaveTime = System.currentTimeMillis();
+                this.lastAutoSaveMessage = "Otomatik kaydedildi";
+            } catch (Exception e) {
+                e.printStackTrace();
+            }
         }
     }
 
@@ -216,6 +240,14 @@ public class Engine {
 
     public void setCurrentProjectPath(String currentProjectPath) {
         this.currentProjectPath = currentProjectPath;
+    }
+
+    public long getLastAutoSaveTime() {
+        return lastAutoSaveTime;
+    }
+
+    public String getLastAutoSaveMessage() {
+        return lastAutoSaveMessage;
     }
 
     public SceneNode getRootNode() {
@@ -235,6 +267,14 @@ public class Engine {
             long now = System.nanoTime();
             float deltaTime = (now - lastTime) / 1_000_000_000.0f;
             lastTime = now;
+
+            if (joints != null) {
+                for (Joint j : joints) {
+                    if (j.getMotor() != null) {
+                        j.getMotor().update(deltaTime);
+                    }
+                }
+            }
 
             imguiLayer.newFrame();
 

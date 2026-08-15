@@ -108,6 +108,14 @@ public class ToolbarPanel {
         }
         ImGui.endDisabled();
 
+        long now = System.currentTimeMillis();
+        if (now - engine.getLastAutoSaveTime() < 2000) {
+            ImGui.sameLine();
+            ImGui.textDisabled("|");
+            ImGui.sameLine();
+            ImGui.textColored(0.4f, 0.85f, 0.4f, 1.0f, "Kaydedildi");
+        }
+
         ImGui.end();
     }
 

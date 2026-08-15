@@ -8,17 +8,32 @@ import imgui.flag.ImGuiWindowFlags;
 import imgui.type.ImFloat;
 import org.joml.Vector3f;
 import rsim2.editor.SelectionManager;
+import rsim2.scene.Joint;
+import rsim2.scene.JointType;
+import rsim2.scene.MotorController;
 import rsim2.scene.SceneNode;
+
+import java.util.List;
 
 public class InspectorPanel {
     private final SelectionManager selectionManager;
+    private List<Joint> joints;
     private final ImFloat valX = new ImFloat();
     private final ImFloat valY = new ImFloat();
     private final ImFloat valZ = new ImFloat();
     private final ImFloat valScale = new ImFloat();
 
     public InspectorPanel(SelectionManager selectionManager) {
+        this(selectionManager, null);
+    }
+
+    public InspectorPanel(SelectionManager selectionManager, List<Joint> joints) {
         this.selectionManager = selectionManager;
+        this.joints = joints;
+    }
+
+    public void setJoints(List<Joint> joints) {
+        this.joints = joints;
     }
 
     public void render() {
@@ -99,6 +114,44 @@ public class InspectorPanel {
             ImGui.spacing();
             if (ImGui.button("Reset Scale", -1.0f, 28.0f)) {
                 targetNode.getLocalScale().set(1.0f, 1.0f, 1.0f);
+            }
+        }
+
+        Joint connectedJoint = null;
+        if (joints != null) {
+            for (Joint j : joints) {
+                if (j.getChildNode() == targetNode) {
+                    connectedJoint = j;
+                    break;
+                }
+            }
+        }
+
+        if (connectedJoint != null && connectedJoint.getType() == JointType.REVOLUTE && connectedJoint.getMotor() != null) {
+            ImGui.spacing();
+            if (ImGui.collapsingHeader("Motor Control (" + connectedJoint.getId() + ")", ImGuiTreeNodeFlags.DefaultOpen)) {
+                MotorController motor = connectedJoint.getMotor();
+                float minDeg = (float) Math.toDegrees(motor.getMinLimitRadians());
+                float maxDeg = (float) Math.toDegrees(motor.getMaxLimitRadians());
+
+                float[] angleArr = new float[]{ motor.getTargetAngleRadians() };
+                ImGui.text("Target Angle");
+                ImGui.setNextItemWidth(-1.0f);
+                if (ImGui.sliderAngle("##targetAngle", angleArr, minDeg, maxDeg)) {
+                    motor.setTargetAngleRadians(angleArr[0]);
+                }
+
+                float currentDeg = (float) Math.toDegrees(connectedJoint.getCurrentAngleRadians());
+                float targetDeg = (float) Math.toDegrees(motor.getTargetAngleRadians());
+
+                ImGui.spacing();
+                ImGui.text(String.format("Current Angle: %.1f°", currentDeg));
+                ImGui.textDisabled(String.format("Target: %.1f° | Max Speed: %.1f rad/s", targetDeg, motor.getMaxSpeedRadiansPerSecond()));
+
+                ImGui.spacing();
+                if (ImGui.button("Reset Angle", -1.0f, 26.0f)) {
+                    motor.setTargetAngleRadians(0.0f);
+                }
             }
         }
 

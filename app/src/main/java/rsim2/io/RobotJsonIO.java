@@ -5,6 +5,7 @@ import org.joml.Vector3f;
 import rsim2.data.*;
 import rsim2.graphics.Mesh;
 import rsim2.scene.Joint;
+import rsim2.scene.JointType;
 import rsim2.scene.SceneNode;
 
 import java.io.*;
@@ -105,7 +106,7 @@ public class RobotJsonIO {
             for (Joint j : joints) {
                 JointDTO jDto = new JointDTO();
                 jDto.id = j.getId();
-                jDto.type = "revolute";
+                jDto.type = j.getType() != null ? j.getType().name().toLowerCase() : "revolute";
                 jDto.parent = j.getParentNode() != null ? j.getParentNode().getId() : "";
                 jDto.child = j.getChildNode() != null ? j.getChildNode().getId() : "";
 
@@ -115,8 +116,13 @@ public class RobotJsonIO {
                 Vector3f childPos = j.getChildNode() != null ? j.getChildNode().getLocalPosition() : new Vector3f();
                 jDto.originPosition = new float[]{ childPos.x, childPos.y, childPos.z };
 
-                jDto.limits = new LimitsDTO(-3.14f, 3.14f, 10.0f);
-                jDto.motor = new MotorDTO("servo", 100.0f);
+                if (j.getType() == JointType.REVOLUTE) {
+                    jDto.limits = new LimitsDTO(j.getMinLimit(), j.getMaxLimit(), j.getMaxSpeed());
+                    jDto.motor = new MotorDTO("servo", 100.0f);
+                } else {
+                    jDto.limits = null;
+                    jDto.motor = null;
+                }
 
                 dto.joints.add(jDto);
             }
@@ -196,11 +202,15 @@ public class RobotJsonIO {
                     parentNode.addChild(childNode);
                 }
 
+                JointType type = JointType.fromString(jDto.type);
                 Vector3f axis = (jDto.axis != null && jDto.axis.length >= 3) 
                         ? new Vector3f(jDto.axis[0], jDto.axis[1], jDto.axis[2]) 
                         : new Vector3f(0, 1, 0);
 
-                Joint joint = new Joint(jDto.id, parentNode, childNode, axis);
+                Joint joint = new Joint(jDto.id, parentNode, childNode, type, axis);
+                if (type == JointType.REVOLUTE && jDto.limits != null) {
+                    joint.setLimits(jDto.limits.min, jDto.limits.max, jDto.limits.maxSpeed > 0 ? jDto.limits.maxSpeed : 2.0f);
+                }
                 result.joints.add(joint);
             }
         }

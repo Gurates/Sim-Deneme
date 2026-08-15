@@ -9,6 +9,7 @@ import imgui.type.ImInt;
 import org.joml.Vector3f;
 import rsim2.core.Engine;
 import rsim2.scene.Joint;
+import rsim2.scene.JointType;
 import rsim2.scene.SceneNode;
 
 import java.util.ArrayList;
@@ -18,7 +19,9 @@ public class JointToolPanel {
     private final Engine engine;
     private SceneNode rootNode;
     private List<Joint> allJoints;
+    private final Runnable onProjectChanged;
 
+    private final ImInt selectedTypeIdx = new ImInt(0);
     private final ImInt selectedParentIdx = new ImInt(0);
     private final ImInt selectedChildIdx = new ImInt(0);
     private final Vector3f selectedAxis = new Vector3f(0.0f, 1.0f, 0.0f);
@@ -33,9 +36,14 @@ public class JointToolPanel {
     private boolean isErrorStatus = false;
 
     public JointToolPanel(Engine engine, SceneNode rootNode, List<Joint> allJoints) {
+        this(engine, rootNode, allJoints, null);
+    }
+
+    public JointToolPanel(Engine engine, SceneNode rootNode, List<Joint> allJoints, Runnable onProjectChanged) {
         this.engine = engine;
         this.rootNode = rootNode;
         this.allJoints = allJoints != null ? allJoints : new ArrayList<>();
+        this.onProjectChanged = onProjectChanged;
     }
 
     public void setRootNode(SceneNode rootNode) {
@@ -84,6 +92,24 @@ public class JointToolPanel {
             selectedChildIdx.set(0);
         }
 
+        ImGui.text("Joint Type");
+        boolean isRev = (selectedTypeIdx.get() == 0);
+        if (isRev) ImGui.pushStyleColor(ImGuiCol.Button, 0.2f, 0.6f, 0.9f, 1.0f);
+        if (ImGui.button("Revolute", 115.0f, 24.0f)) {
+            selectedTypeIdx.set(0);
+        }
+        if (isRev) ImGui.popStyleColor();
+
+        ImGui.sameLine();
+        boolean isFixed = (selectedTypeIdx.get() == 1);
+        if (isFixed) ImGui.pushStyleColor(ImGuiCol.Button, 0.2f, 0.6f, 0.9f, 1.0f);
+        if (ImGui.button("Fixed", 115.0f, 24.0f)) {
+            selectedTypeIdx.set(1);
+        }
+        if (isFixed) ImGui.popStyleColor();
+
+        ImGui.spacing();
+
         ImGui.text("Parent Link");
         ImGui.setNextItemWidth(-1.0f);
         ImGui.combo("##parentCombo", selectedParentIdx, nodeNames);
@@ -92,7 +118,6 @@ public class JointToolPanel {
 
         ImGui.text("Child Link");
         ImGui.setNextItemWidth(-1.0f);
-        int prevChildIdx = selectedChildIdx.get();
         if (ImGui.combo("##childCombo", selectedChildIdx, nodeNames) || activePreviewChild == null) {
             SceneNode newChild = flatNodes.get(selectedChildIdx.get());
             if (newChild != activePreviewChild) {
@@ -111,31 +136,33 @@ public class JointToolPanel {
                 ? flatNodes.get(selectedChildIdx.get())
                 : null;
 
-        ImGui.spacing();
-        ImGui.text("Rotation Axis");
+        if (selectedTypeIdx.get() == 0) {
+            ImGui.spacing();
+            ImGui.text("Rotation Axis");
 
-        boolean isX = selectedAxis.x == 1.0f;
-        if (isX) ImGui.pushStyleColor(ImGuiCol.Button, 0.2f, 0.6f, 0.9f, 1.0f);
-        if (ImGui.button("X##axisX", 75.0f, 24.0f)) {
-            selectedAxis.set(1.0f, 0.0f, 0.0f);
-        }
-        if (isX) ImGui.popStyleColor();
+            boolean isX = selectedAxis.x == 1.0f;
+            if (isX) ImGui.pushStyleColor(ImGuiCol.Button, 0.2f, 0.6f, 0.9f, 1.0f);
+            if (ImGui.button("X##axisX", 75.0f, 24.0f)) {
+                selectedAxis.set(1.0f, 0.0f, 0.0f);
+            }
+            if (isX) ImGui.popStyleColor();
 
-        ImGui.sameLine();
-        boolean isY = selectedAxis.y == 1.0f;
-        if (isY) ImGui.pushStyleColor(ImGuiCol.Button, 0.2f, 0.6f, 0.9f, 1.0f);
-        if (ImGui.button("Y##axisY", 75.0f, 24.0f)) {
-            selectedAxis.set(0.0f, 1.0f, 0.0f);
-        }
-        if (isY) ImGui.popStyleColor();
+            ImGui.sameLine();
+            boolean isY = selectedAxis.y == 1.0f;
+            if (isY) ImGui.pushStyleColor(ImGuiCol.Button, 0.2f, 0.6f, 0.9f, 1.0f);
+            if (ImGui.button("Y##axisY", 75.0f, 24.0f)) {
+                selectedAxis.set(0.0f, 1.0f, 0.0f);
+            }
+            if (isY) ImGui.popStyleColor();
 
-        ImGui.sameLine();
-        boolean isZ = selectedAxis.z == 1.0f;
-        if (isZ) ImGui.pushStyleColor(ImGuiCol.Button, 0.2f, 0.6f, 0.9f, 1.0f);
-        if (ImGui.button("Z##axisZ", 75.0f, 24.0f)) {
-            selectedAxis.set(0.0f, 0.0f, 1.0f);
+            ImGui.sameLine();
+            boolean isZ = selectedAxis.z == 1.0f;
+            if (isZ) ImGui.pushStyleColor(ImGuiCol.Button, 0.2f, 0.6f, 0.9f, 1.0f);
+            if (ImGui.button("Z##axisZ", 75.0f, 24.0f)) {
+                selectedAxis.set(0.0f, 0.0f, 1.0f);
+            }
+            if (isZ) ImGui.popStyleColor();
         }
-        if (isZ) ImGui.popStyleColor();
 
         ImGui.spacing();
         ImGui.text("Origin Position (Live Preview)");
@@ -181,17 +208,21 @@ public class JointToolPanel {
                     uniqueJointId = baseJointId + "_" + counter++;
                 }
 
-                Joint newJoint = new Joint(uniqueJointId, parentNode, childNode, new Vector3f(selectedAxis));
+                JointType type = (selectedTypeIdx.get() == 0) ? JointType.REVOLUTE : JointType.FIXED;
+                Vector3f axis = (type == JointType.REVOLUTE) ? new Vector3f(selectedAxis) : new Vector3f(0.0f, 0.0f, 0.0f);
+
+                Joint newJoint = new Joint(uniqueJointId, parentNode, childNode, type, axis);
                 allJoints.add(newJoint);
+
+                if (onProjectChanged != null) {
+                    onProjectChanged.run();
+                } else if (engine != null) {
+                    engine.autoSaveProject();
+                }
 
                 String currentPath = engine != null ? engine.getCurrentProjectPath() : null;
                 if (currentPath != null && !currentPath.trim().isEmpty()) {
-                    try {
-                        engine.saveProject(currentPath);
-                        statusMessage = "Joint created: " + uniqueJointId + " (Saved)";
-                    } catch (Exception e) {
-                        statusMessage = "Joint created: " + uniqueJointId + " (Save failed)";
-                    }
+                    statusMessage = "Joint created: " + uniqueJointId + " (Saved)";
                 } else {
                     statusMessage = "Joint created: " + uniqueJointId;
                 }
