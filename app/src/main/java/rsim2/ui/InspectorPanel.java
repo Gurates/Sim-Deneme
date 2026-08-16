@@ -7,6 +7,7 @@ import imgui.flag.ImGuiTreeNodeFlags;
 import imgui.flag.ImGuiWindowFlags;
 import imgui.type.ImFloat;
 import org.joml.Vector3f;
+import rsim2.core.Engine;
 import rsim2.editor.SelectionManager;
 import rsim2.scene.Joint;
 import rsim2.scene.JointType;
@@ -16,6 +17,7 @@ import rsim2.scene.SceneNode;
 import java.util.List;
 
 public class InspectorPanel {
+    private final Engine engine;
     private final SelectionManager selectionManager;
     private List<Joint> joints;
     private final ImFloat valX = new ImFloat();
@@ -24,10 +26,15 @@ public class InspectorPanel {
     private final ImFloat valScale = new ImFloat();
 
     public InspectorPanel(SelectionManager selectionManager) {
-        this(selectionManager, null);
+        this(null, selectionManager, null);
     }
 
     public InspectorPanel(SelectionManager selectionManager, List<Joint> joints) {
+        this(null, selectionManager, joints);
+    }
+
+    public InspectorPanel(Engine engine, SelectionManager selectionManager, List<Joint> joints) {
+        this.engine = engine;
         this.selectionManager = selectionManager;
         this.joints = joints;
     }
@@ -166,11 +173,15 @@ public class InspectorPanel {
             ImGui.pushStyleColor(ImGuiCol.Text, 1.0f, 1.0f, 1.0f, 1.0f);
 
             if (ImGui.button("Delete Object", -1.0f, 32.0f)) {
-                SceneNode parent = targetNode.getParent();
-                if (parent != null) {
-                    parent.removeChild(targetNode);
-                    selectionManager.clearSelection();
-                    targetNode.cleanup();
+                if (engine != null) {
+                    engine.deleteNode(targetNode);
+                } else {
+                    SceneNode parent = targetNode.getParent();
+                    if (parent != null) {
+                        parent.removeChild(targetNode);
+                        selectionManager.clearSelection();
+                        targetNode.cleanup();
+                    }
                 }
             }
 

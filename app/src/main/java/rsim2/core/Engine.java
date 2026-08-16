@@ -10,6 +10,7 @@ import rsim2.camera.Camera;
 import rsim2.data.RobotDefinitionDTO;
 import rsim2.editor.Picker;
 import rsim2.editor.SelectionManager;
+import rsim2.editor.TranslateGizmo;
 import rsim2.graphics.Renderer;
 import rsim2.input.Input;
 import rsim2.io.RobotJsonIO;
@@ -20,7 +21,9 @@ import rsim2.ui.*;
 import java.io.File;
 import java.nio.IntBuffer;
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Set;
 
 import static org.lwjgl.glfw.Callbacks.glfwFreeCallbacks;
 import static org.lwjgl.glfw.GLFW.*;
@@ -37,6 +40,7 @@ public class Engine {
     private Input input;
     private Renderer renderer;
     private Camera camera;
+    private TranslateGizmo translateGizmo;
 
     private ImGuiLayer imguiLayer;
     private SelectionManager selectionManager;
@@ -139,12 +143,14 @@ public class Engine {
 
         camera = new Camera((float) width / height);
         renderer = new Renderer();
+        translateGizmo = new TranslateGizmo();
 
         try {
             renderer.init();
+            translateGizmo.init();
         } catch (Exception e) {
             e.printStackTrace();
-            throw new RuntimeException("Failed to initialize Renderer", e);
+            throw new RuntimeException("Failed to initialize Renderer/Gizmo", e);
         }
 
         setupScene();
@@ -158,7 +164,7 @@ public class Engine {
 
         toolbarPanel = new ToolbarPanel(this, rootNode, selectionManager);
         hierarchyPanel = new HierarchyPanel(rootNode, selectionManager);
-        inspectorPanel = new InspectorPanel(selectionManager, joints);
+        inspectorPanel = new InspectorPanel(this, selectionManager, joints);
         jointToolPanel = new JointToolPanel(this, rootNode, joints, this::autoSaveProject);
     }
 
@@ -234,6 +240,34 @@ public class Engine {
         }
     }
 
+    public void deleteNode(SceneNode node) {
+        if (node == null || node.getParent() == null) {
+            return;
+        }
+
+        Set<SceneNode> nodesToRemove = new HashSet<>();
+        collectSubtree(node, nodesToRemove);
+
+        if (joints != null) {
+            joints.removeIf(j -> nodesToRemove.contains(j.getChildNode()) || nodesToRemove.contains(j.getParentNode()));
+        }
+
+        if (selectionManager != null && nodesToRemove.contains(selectionManager.getSelected())) {
+            selectionManager.clearSelection();
+        }
+
+        node.getParent().removeChild(node);
+        node.cleanup();
+    }
+
+    private void collectSubtree(SceneNode current, Set<SceneNode> collected) {
+        if (current == null) return;
+        collected.add(current);
+        for (SceneNode child : current.getChildren()) {
+            collectSubtree(child, collected);
+        }
+    }
+
     public String getCurrentProjectPath() {
         return currentProjectPath;
     }
@@ -282,25 +316,66 @@ public class Engine {
 
             input.update();
 
+            SceneNode gizmoTarget = null;
+            if (jointToolPanel != null && jointToolPanel.getActivePreviewChild() != null) {
+                gizmoTarget = jointToolPanel.getActivePreviewChild();
+            } else if (selectionManager != null) {
+                gizmoTarget = selectionManager.getSelected();
+            }
+            if (translateGizmo != null) {
+                translateGizmo.setTargetNode(gizmoTarget);
+            }
+
             if (input.isKeyPressed(GLFW_KEY_DELETE)) {
                 SceneNode selected = selectionManager != null ? selectionManager.getSelected() : null;
-                if (selected != null && selected.getParent() != null) {
-                    selected.getParent().removeChild(selected);
-                    selectionManager.clearSelection();
-                    selected.cleanup();
+                if (selected != null) {
+                    deleteNode(selected);
                 }
             }
 
-            if (input.isMouseButtonClicked(GLFW_MOUSE_BUTTON_LEFT) && !ImGui.getIO().getWantCaptureMouse()) {
-                SceneNode picked = Picker.pick(input.getMouseX(), input.getMouseY(), width, height, camera, rootNode);
-                if (picked != null) {
-                    selectionManager.select(picked);
+            boolean wantCaptureMouse = false;
+            try {
+                wantCaptureMouse = ImGui.getIO().getWantCaptureMouse();
+            } catch (Throwable ignored) {
+            }
+
+            if (!wantCaptureMouse) {
+                if (input.isMouseButtonClicked(GLFW_MOUSE_BUTTON_LEFT)) {
+                    boolean pickedGizmo = false;
+                    if (translateGizmo != null) {
+                        pickedGizmo = translateGizmo.onMouseDown(input.getMouseX(), input.getMouseY(), camera, width, height);
+                    }
+
+                    if (!pickedGizmo) {
+                        SceneNode picked = Picker.pick(input.getMouseX(), input.getMouseY(), width, height, camera, rootNode);
+                        if (picked != null && selectionManager != null) {
+                            selectionManager.select(picked);
+                        }
+                    }
+                }
+
+                if (input.isMouseButtonDown(GLFW_MOUSE_BUTTON_LEFT)) {
+                    if (translateGizmo != null && translateGizmo.isDragging()) {
+                        translateGizmo.onMouseDrag(input.getMouseX(), input.getMouseY(), camera, width, height);
+                    }
                 }
             }
 
-            camera.update(input, deltaTime);
+            if (!input.isMouseButtonDown(GLFW_MOUSE_BUTTON_LEFT)) {
+                if (translateGizmo != null && translateGizmo.isDragging()) {
+                    translateGizmo.onMouseUp();
+                }
+            }
+
+            if (translateGizmo == null || !translateGizmo.isDragging()) {
+                camera.update(input, deltaTime);
+            }
 
             renderer.render(camera, rootNode);
+
+            if (translateGizmo != null) {
+                translateGizmo.render(camera, width, height);
+            }
 
             if (toolbarPanel != null) {
                 toolbarPanel.render();
@@ -320,6 +395,9 @@ public class Engine {
             glfwPollEvents();
         }
 
+        if (translateGizmo != null) {
+            translateGizmo.cleanup();
+        }
         renderer.cleanup();
     }
 }

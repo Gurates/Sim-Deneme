@@ -11,5 +11,6 @@ public class RobotDefinitionDTO {
     public List<JointDTO> joints = new ArrayList<>();
     public List<Object> sensors = new ArrayList<>();
 
-    public RobotDefinitionDTO() {}
+    public RobotDefinitionDTO() {
+    }
 }

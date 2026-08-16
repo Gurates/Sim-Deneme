@@ -84,6 +84,14 @@ public class Mesh {
         return maxBound;
     }
 
+    public Vector3f getBoundingBoxMin() {
+        return minBound;
+    }
+
+    public Vector3f getBoundingBoxMax() {
+        return maxBound;
+    }
+
     public void cleanup() {
         glBindVertexArray(0);
         if (vao != 0) glDeleteVertexArrays(vao);

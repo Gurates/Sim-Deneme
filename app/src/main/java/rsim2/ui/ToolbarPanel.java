@@ -100,10 +100,8 @@ public class ToolbarPanel {
 
         ImGui.beginDisabled(!canDelete);
         if (ImGui.button("Delete Object", 110.0f, 24.0f)) {
-            if (selected != null && selected.getParent() != null) {
-                selected.getParent().removeChild(selected);
-                selectionManager.clearSelection();
-                selected.cleanup();
+            if (selected != null) {
+                engine.deleteNode(selected);
             }
         }
         ImGui.endDisabled();
