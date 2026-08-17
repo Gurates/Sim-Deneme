@@ -20,31 +20,42 @@ public class Mesh {
     private final Vector3f minBound;
     private final Vector3f maxBound;
 
+    private final float[] vertices;
+    private final int[] indices;
+
     public Mesh(float[] vertices, float[] normals, int[] indices) {
-        this.vertexCount = indices.length;
+        this.vertices = vertices;
+        this.indices = indices;
+        this.vertexCount = indices != null ? indices.length : 0;
 
         minBound = new Vector3f(Float.MAX_VALUE, Float.MAX_VALUE, Float.MAX_VALUE);
         maxBound = new Vector3f(-Float.MAX_VALUE, -Float.MAX_VALUE, -Float.MAX_VALUE);
 
-        for (int i = 0; i < vertices.length; i += 3) {
-            float x = vertices[i];
-            float y = vertices[i + 1];
-            float z = vertices[i + 2];
-            minBound.min(new Vector3f(x, y, z));
-            maxBound.max(new Vector3f(x, y, z));
+        if (vertices != null) {
+            for (int i = 0; i < vertices.length; i += 3) {
+                float x = vertices[i];
+                float y = vertices[i + 1];
+                float z = vertices[i + 2];
+                minBound.min(new Vector3f(x, y, z));
+                maxBound.max(new Vector3f(x, y, z));
+            }
         }
 
         vao = glGenVertexArrays();
         glBindVertexArray(vao);
 
-        FloatBuffer posBuffer = BufferUtils.createFloatBuffer(vertices.length);
-        posBuffer.put(vertices).flip();
+        if (vertices != null && vertices.length > 0) {
+            FloatBuffer posBuffer = BufferUtils.createFloatBuffer(vertices.length);
+            posBuffer.put(vertices).flip();
 
-        vboPositions = glGenBuffers();
-        glBindBuffer(GL_ARRAY_BUFFER, vboPositions);
-        glBufferData(GL_ARRAY_BUFFER, posBuffer, GL_STATIC_DRAW);
-        glVertexAttribPointer(0, 3, GL_FLOAT, false, 0, 0);
-        glEnableVertexAttribArray(0);
+            vboPositions = glGenBuffers();
+            glBindBuffer(GL_ARRAY_BUFFER, vboPositions);
+            glBufferData(GL_ARRAY_BUFFER, posBuffer, GL_STATIC_DRAW);
+            glVertexAttribPointer(0, 3, GL_FLOAT, false, 0, 0);
+            glEnableVertexAttribArray(0);
+        } else {
+            vboPositions = 0;
+        }
 
         if (normals != null && normals.length > 0) {
             FloatBuffer normBuffer = BufferUtils.createFloatBuffer(normals.length);
@@ -59,12 +70,16 @@ public class Mesh {
             vboNormals = 0;
         }
 
-        IntBuffer idxBuffer = BufferUtils.createIntBuffer(indices.length);
-        idxBuffer.put(indices).flip();
+        if (indices != null && indices.length > 0) {
+            IntBuffer idxBuffer = BufferUtils.createIntBuffer(indices.length);
+            idxBuffer.put(indices).flip();
 
-        ebo = glGenBuffers();
-        glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, ebo);
-        glBufferData(GL_ELEMENT_ARRAY_BUFFER, idxBuffer, GL_STATIC_DRAW);
+            ebo = glGenBuffers();
+            glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, ebo);
+            glBufferData(GL_ELEMENT_ARRAY_BUFFER, idxBuffer, GL_STATIC_DRAW);
+        } else {
+            ebo = 0;
+        }
 
         glBindBuffer(GL_ARRAY_BUFFER, 0);
         glBindVertexArray(0);
@@ -74,6 +89,14 @@ public class Mesh {
         glBindVertexArray(vao);
         glDrawElements(GL_TRIANGLES, vertexCount, GL_UNSIGNED_INT, 0);
         glBindVertexArray(0);
+    }
+
+    public float[] getVertices() {
+        return vertices;
+    }
+
+    public int[] getIndices() {
+        return indices;
     }
 
     public Vector3f getMinBound() {

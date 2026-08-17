@@ -9,6 +9,7 @@ import org.lwjgl.system.MemoryStack;
 import rsim2.camera.Camera;
 import rsim2.data.RobotDefinitionDTO;
 import rsim2.editor.Picker;
+import rsim2.editor.PointAlignTool;
 import rsim2.editor.SelectionManager;
 import rsim2.editor.TranslateGizmo;
 import rsim2.graphics.Renderer;
@@ -41,13 +42,14 @@ public class Engine {
     private Renderer renderer;
     private Camera camera;
     private TranslateGizmo translateGizmo;
+    private PointAlignTool pointAlignTool;
 
     private ImGuiLayer imguiLayer;
     private SelectionManager selectionManager;
     private ToolbarPanel toolbarPanel;
     private HierarchyPanel hierarchyPanel;
+    private AllJointsPanel allJointsPanel;
     private InspectorPanel inspectorPanel;
-    private JointToolPanel jointToolPanel;
 
     private SceneNode rootNode;
     private List<Joint> joints = new ArrayList<>();
@@ -144,6 +146,7 @@ public class Engine {
         camera = new Camera((float) width / height);
         renderer = new Renderer();
         translateGizmo = new TranslateGizmo();
+        pointAlignTool = new PointAlignTool();
 
         try {
             renderer.init();
@@ -164,8 +167,8 @@ public class Engine {
 
         toolbarPanel = new ToolbarPanel(this, rootNode, selectionManager);
         hierarchyPanel = new HierarchyPanel(rootNode, selectionManager);
-        inspectorPanel = new InspectorPanel(this, selectionManager, joints);
-        jointToolPanel = new JointToolPanel(this, rootNode, joints, this::autoSaveProject);
+        allJointsPanel = new AllJointsPanel(this, rootNode, joints);
+        inspectorPanel = new InspectorPanel(this, rootNode, selectionManager, joints, pointAlignTool);
     }
 
     public void loadProject(String filePath) {
@@ -186,6 +189,10 @@ public class Engine {
             this.joints = res.joints != null ? res.joints : new ArrayList<>();
             this.currentProjectPath = filePath;
 
+            if (pointAlignTool != null) {
+                pointAlignTool.clearPoints();
+            }
+
             if (selectionManager != null) {
                 selectionManager.clearSelection();
             }
@@ -195,12 +202,14 @@ public class Engine {
             if (toolbarPanel != null) {
                 toolbarPanel.setRootNode(this.rootNode);
             }
-            if (inspectorPanel != null) {
-                inspectorPanel.setJoints(this.joints);
+            if (allJointsPanel != null) {
+                allJointsPanel.setRootNode(this.rootNode);
+                allJointsPanel.setJoints(this.joints);
             }
-            if (jointToolPanel != null) {
-                jointToolPanel.setRootNode(this.rootNode);
-                jointToolPanel.setJoints(this.joints);
+            if (inspectorPanel != null) {
+                inspectorPanel.setRootNode(this.rootNode);
+                inspectorPanel.setJoints(this.joints);
+                inspectorPanel.setPointAlignTool(this.pointAlignTool);
             }
         } catch (Exception e) {
             e.printStackTrace();
@@ -316,12 +325,7 @@ public class Engine {
 
             input.update();
 
-            SceneNode gizmoTarget = null;
-            if (jointToolPanel != null && jointToolPanel.getActivePreviewChild() != null) {
-                gizmoTarget = jointToolPanel.getActivePreviewChild();
-            } else if (selectionManager != null) {
-                gizmoTarget = selectionManager.getSelected();
-            }
+            SceneNode gizmoTarget = selectionManager != null ? selectionManager.getSelected() : null;
             if (translateGizmo != null) {
                 translateGizmo.setTargetNode(gizmoTarget);
             }
@@ -341,15 +345,19 @@ public class Engine {
 
             if (!wantCaptureMouse) {
                 if (input.isMouseButtonClicked(GLFW_MOUSE_BUTTON_LEFT)) {
-                    boolean pickedGizmo = false;
-                    if (translateGizmo != null) {
-                        pickedGizmo = translateGizmo.onMouseDown(input.getMouseX(), input.getMouseY(), camera, width, height);
-                    }
+                    if (pointAlignTool != null && pointAlignTool.isPicking()) {
+                        pointAlignTool.onSceneClick(input.getMouseX(), input.getMouseY(), camera, width, height);
+                    } else {
+                        boolean pickedGizmo = false;
+                        if (translateGizmo != null) {
+                            pickedGizmo = translateGizmo.onMouseDown(input.getMouseX(), input.getMouseY(), camera, width, height);
+                        }
 
-                    if (!pickedGizmo) {
-                        SceneNode picked = Picker.pick(input.getMouseX(), input.getMouseY(), width, height, camera, rootNode);
-                        if (picked != null && selectionManager != null) {
-                            selectionManager.select(picked);
+                        if (!pickedGizmo) {
+                            SceneNode picked = Picker.pick(input.getMouseX(), input.getMouseY(), width, height, camera, rootNode);
+                            if (picked != null && selectionManager != null) {
+                                selectionManager.select(picked);
+                            }
                         }
                     }
                 }
@@ -375,6 +383,15 @@ public class Engine {
 
             if (translateGizmo != null) {
                 translateGizmo.render(camera, width, height);
+
+                if (pointAlignTool != null) {
+                    if (pointAlignTool.getPickedParentPointWorld() != null) {
+                        translateGizmo.renderPointMarker(pointAlignTool.getPickedParentPointWorld(), camera, 1.0f, 0.55f, 0.0f);
+                    }
+                    if (pointAlignTool.getPickedChildPointWorld() != null) {
+                        translateGizmo.renderPointMarker(pointAlignTool.getPickedChildPointWorld(), camera, 0.85f, 0.25f, 0.95f);
+                    }
+                }
             }
 
             if (toolbarPanel != null) {
@@ -383,13 +400,17 @@ public class Engine {
             if (hierarchyPanel != null) {
                 hierarchyPanel.render();
             }
+            if (allJointsPanel != null) {
+                allJointsPanel.render();
+            }
             if (inspectorPanel != null) {
                 inspectorPanel.render();
             }
-            if (jointToolPanel != null) {
-                jointToolPanel.render();
-            }
             imguiLayer.render();
+
+            if (!input.isMouseButtonDown(GLFW_MOUSE_BUTTON_LEFT)) {
+                HierarchyPanel.draggedNode = null;
+            }
 
             glfwSwapBuffers(window);
             glfwPollEvents();

@@ -3,7 +3,6 @@ package rsim2.editor;
 import org.joml.Matrix4f;
 import org.joml.Vector2f;
 import org.joml.Vector3f;
-import org.joml.Vector4f;
 import org.lwjgl.BufferUtils;
 import rsim2.camera.Camera;
 import rsim2.graphics.ShaderProgram;
@@ -36,6 +35,9 @@ public class TranslateGizmo {
     private int vao;
     private int vbo;
 
+    private int markerVao;
+    private int markerVbo;
+
     private final Matrix4f modelMatrix = new Matrix4f();
 
     private final float[] lineVertices = new float[]{
@@ -66,6 +68,32 @@ public class TranslateGizmo {
 
         vbo = glGenBuffers();
         glBindBuffer(GL_ARRAY_BUFFER, vbo);
+        glBufferData(GL_ARRAY_BUFFER, buffer, GL_STATIC_DRAW);
+
+        glVertexAttribPointer(0, 3, GL_FLOAT, false, 3 * Float.BYTES, 0);
+        glEnableVertexAttribArray(0);
+
+        glBindBuffer(GL_ARRAY_BUFFER, 0);
+        glBindVertexArray(0);
+
+        setupMarkerMesh();
+    }
+
+    private void setupMarkerMesh() {
+        float s = 0.08f;
+        float[] markerVerts = new float[]{
+                -s, 0.0f, 0.0f,  s, 0.0f, 0.0f,
+                0.0f, -s, 0.0f,  0.0f, s, 0.0f,
+                0.0f, 0.0f, -s,  0.0f, 0.0f, s
+        };
+        markerVao = glGenVertexArrays();
+        glBindVertexArray(markerVao);
+
+        FloatBuffer buffer = BufferUtils.createFloatBuffer(markerVerts.length);
+        buffer.put(markerVerts).flip();
+
+        markerVbo = glGenBuffers();
+        glBindBuffer(GL_ARRAY_BUFFER, markerVbo);
         glBufferData(GL_ARRAY_BUFFER, buffer, GL_STATIC_DRAW);
 
         glVertexAttribPointer(0, 3, GL_FLOAT, false, 3 * Float.BYTES, 0);
@@ -146,6 +174,42 @@ public class TranslateGizmo {
         glDrawArrays(GL_LINES, 4, 2);
 
         glBindVertexArray(0);
+        gizmoShader.unbind();
+
+        glLineWidth(1.0f);
+        glEnable(GL_DEPTH_TEST);
+    }
+
+    public void renderPointMarker(Vector3f worldPos, Camera camera, float r, float g, float b) {
+        if (worldPos == null || gizmoShader == null) {
+            return;
+        }
+
+        modelMatrix.identity().translation(worldPos);
+
+        glDisable(GL_DEPTH_TEST);
+        glLineWidth(3.0f);
+
+        gizmoShader.bind();
+
+        FloatBuffer projBuf = BufferUtils.createFloatBuffer(16);
+        camera.getProjectionMatrix().get(projBuf);
+        glUniformMatrix4fv(projLoc, false, projBuf);
+
+        FloatBuffer viewBuf = BufferUtils.createFloatBuffer(16);
+        camera.getViewMatrix().get(viewBuf);
+        glUniformMatrix4fv(viewLoc, false, viewBuf);
+
+        FloatBuffer modelBuf = BufferUtils.createFloatBuffer(16);
+        modelMatrix.get(modelBuf);
+        glUniformMatrix4fv(modelLoc, false, modelBuf);
+
+        glUniform4f(colorLoc, r, g, b, 1.0f);
+
+        glBindVertexArray(markerVao);
+        glDrawArrays(GL_LINES, 0, 6);
+        glBindVertexArray(0);
+
         gizmoShader.unbind();
 
         glLineWidth(1.0f);
@@ -287,5 +351,7 @@ public class TranslateGizmo {
         }
         if (vao != 0) glDeleteVertexArrays(vao);
         if (vbo != 0) glDeleteBuffers(vbo);
+        if (markerVao != 0) glDeleteVertexArrays(markerVao);
+        if (markerVbo != 0) glDeleteBuffers(markerVbo);
     }
 }

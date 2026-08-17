@@ -8,6 +8,8 @@ import rsim2.editor.SelectionManager;
 import rsim2.scene.SceneNode;
 
 public class HierarchyPanel {
+    public static SceneNode draggedNode = null;
+
     private SceneNode rootNode;
     private final SelectionManager selectionManager;
 
@@ -53,14 +55,20 @@ public class HierarchyPanel {
         if (isLeaf) {
             nodeFlags |= ImGuiTreeNodeFlags.Leaf | ImGuiTreeNodeFlags.NoTreePushOnOpen;
             ImGui.treeNodeEx(node.getId(), nodeFlags, node.getId());
-            if (ImGui.isItemClicked()) {
+
+            handleDragDrop(node);
+
+            if (ImGui.isItemHovered() && ImGui.isMouseReleased(0)) {
                 if (selectionManager != null) {
                     selectionManager.select(node);
                 }
             }
         } else {
             boolean nodeOpen = ImGui.treeNodeEx(node.getId(), nodeFlags, node.getId());
-            if (ImGui.isItemClicked()) {
+
+            handleDragDrop(node);
+
+            if (ImGui.isItemHovered() && ImGui.isMouseReleased(0)) {
                 if (selectionManager != null) {
                     selectionManager.select(node);
                 }
@@ -71,6 +79,15 @@ public class HierarchyPanel {
                 }
                 ImGui.treePop();
             }
+        }
+    }
+
+    private void handleDragDrop(SceneNode node) {
+        if (ImGui.beginDragDropSource()) {
+            draggedNode = node;
+            ImGui.setDragDropPayload("SCENE_NODE", node.getId());
+            ImGui.text("Parent: " + node.getId());
+            ImGui.endDragDropSource();
         }
     }
 }

@@ -3,12 +3,14 @@ package rsim2.ui;
 import imgui.ImGui;
 import imgui.flag.ImGuiCond;
 import imgui.flag.ImGuiWindowFlags;
+import imgui.type.ImInt;
 import org.lwjgl.PointerBuffer;
 import org.lwjgl.system.MemoryStack;
 import org.lwjgl.util.tinyfd.TinyFileDialogs;
 import rsim2.core.Engine;
 import rsim2.editor.ModelImporter;
 import rsim2.editor.SelectionManager;
+import rsim2.editor.UpAxis;
 import rsim2.scene.SceneNode;
 
 import java.util.List;
@@ -19,6 +21,9 @@ public class ToolbarPanel {
     private final Engine engine;
     private SceneNode rootNode;
     private final SelectionManager selectionManager;
+
+    private final ImInt selectedUpAxisIdx = new ImInt(0);
+    private boolean isGroupImportPending = false;
 
     public ToolbarPanel(Engine engine, SceneNode rootNode, SelectionManager selectionManager) {
         this.engine = engine;
@@ -77,18 +82,52 @@ public class ToolbarPanel {
         ImGui.sameLine();
 
         if (ImGui.button("Import Model", 120.0f, 24.0f)) {
-            SceneNode imported = ModelImporter.importModel(rootNode);
-            if (imported != null && selectionManager != null) {
-                selectionManager.select(imported);
-            }
+            isGroupImportPending = false;
+            ImGui.openPopup("Import 3D Model");
         }
 
         ImGui.sameLine();
         if (ImGui.button("Import Model Group", 150.0f, 24.0f)) {
-            List<SceneNode> group = ModelImporter.importModelsGroup(rootNode);
-            if (!group.isEmpty() && selectionManager != null) {
-                selectionManager.select(group.get(0));
+            isGroupImportPending = true;
+            ImGui.openPopup("Import 3D Model");
+        }
+
+        if (ImGui.beginPopupModal("Import 3D Model", ImGuiWindowFlags.AlwaysAutoResize)) {
+            ImGui.text("Select Model Coordinate System (Up Axis):");
+            ImGui.spacing();
+
+            ImGui.radioButton("Y-up (Unity, standard 3D meshes)", selectedUpAxisIdx, 0);
+            ImGui.radioButton("Z-up (SolidWorks, Fusion 360, CAD, Robotics)", selectedUpAxisIdx, 1);
+
+            ImGui.spacing();
+            ImGui.textDisabled("Note: If your model was exported from SolidWorks or Fusion 360, select Z-up.");
+            ImGui.spacing();
+            ImGui.separator();
+            ImGui.spacing();
+
+            if (ImGui.button("Select File(s)...", 140.0f, 26.0f)) {
+                UpAxis upAxis = (selectedUpAxisIdx.get() == 1) ? UpAxis.Z_UP : UpAxis.Y_UP;
+                ImGui.closeCurrentPopup();
+
+                if (isGroupImportPending) {
+                    List<SceneNode> group = ModelImporter.importModelsGroup(rootNode, upAxis);
+                    if (!group.isEmpty() && selectionManager != null) {
+                        selectionManager.select(group.get(0));
+                    }
+                } else {
+                    SceneNode imported = ModelImporter.importModel(rootNode, upAxis);
+                    if (imported != null && selectionManager != null) {
+                        selectionManager.select(imported);
+                    }
+                }
             }
+
+            ImGui.sameLine();
+            if (ImGui.button("Cancel", 80.0f, 26.0f)) {
+                ImGui.closeCurrentPopup();
+            }
+
+            ImGui.endPopup();
         }
 
         ImGui.sameLine();

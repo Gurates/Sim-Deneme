@@ -30,7 +30,19 @@ public class AlignmentHelper {
         if (child == null) {
             return;
         }
-        child.getLocalPosition().x = 0.0f;
-        child.getLocalPosition().z = 0.0f;
+        if (parent == null || parent.getMesh() == null || child.getMesh() == null) {
+            child.getLocalPosition().x = 0.0f;
+            child.getLocalPosition().z = 0.0f;
+            return;
+        }
+
+        float parentCenterX = (parent.getMesh().getBoundingBoxMin().x + parent.getMesh().getBoundingBoxMax().x) / 2.0f * parent.getLocalScale().x;
+        float parentCenterZ = (parent.getMesh().getBoundingBoxMin().z + parent.getMesh().getBoundingBoxMax().z) / 2.0f * parent.getLocalScale().z;
+
+        float childCenterX = (child.getMesh().getBoundingBoxMin().x + child.getMesh().getBoundingBoxMax().x) / 2.0f * child.getLocalScale().x;
+        float childCenterZ = (child.getMesh().getBoundingBoxMin().z + child.getMesh().getBoundingBoxMax().z) / 2.0f * child.getLocalScale().z;
+
+        child.getLocalPosition().x = parentCenterX - childCenterX;
+        child.getLocalPosition().z = parentCenterZ - childCenterZ;
     }
 }

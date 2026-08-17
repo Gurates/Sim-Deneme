@@ -99,6 +99,11 @@ public class RobotJsonIO {
             link.mass = 1.0f;
             Vector3f scale = node.getLocalScale();
             link.scale = new float[]{ scale.x, scale.y, scale.z };
+
+            Vector3f euler = new Vector3f();
+            node.getLocalRotation().getEulerAnglesXYZ(euler);
+            link.rotation = new float[]{ (float) Math.toDegrees(euler.x), (float) Math.toDegrees(euler.y), (float) Math.toDegrees(euler.z) };
+
             dto.links.add(link);
         }
 
@@ -184,6 +189,14 @@ public class RobotJsonIO {
 
             if (link.scale != null && link.scale.length >= 3) {
                 node.getLocalScale().set(link.scale[0], link.scale[1], link.scale[2]);
+            }
+
+            if (link.rotation != null && link.rotation.length >= 3) {
+                node.getLocalRotation().rotationXYZ(
+                        (float) Math.toRadians(link.rotation[0]),
+                        (float) Math.toRadians(link.rotation[1]),
+                        (float) Math.toRadians(link.rotation[2])
+                );
             }
 
             result.nodesById.put(link.id, node);

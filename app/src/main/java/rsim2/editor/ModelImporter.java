@@ -22,6 +22,10 @@ public class ModelImporter {
     private static final float TARGET_SIZE = 2.0f;
 
     public static SceneNode importModel(SceneNode root) {
+        return importModel(root, UpAxis.Y_UP);
+    }
+
+    public static SceneNode importModel(SceneNode root, UpAxis upAxis) {
         String selectedPath;
 
         try (MemoryStack stack = stackPush()) {
@@ -81,6 +85,10 @@ public class ModelImporter {
                 newNode.getLocalScale().set(scaleFactor, scaleFactor, scaleFactor);
             }
 
+            if (upAxis == UpAxis.Z_UP) {
+                newNode.getLocalRotation().rotateX((float) Math.toRadians(-90));
+            }
+
             if (root != null) {
                 root.addChild(newNode);
             }
@@ -93,6 +101,10 @@ public class ModelImporter {
     }
 
     public static List<SceneNode> importModelsGroup(SceneNode root) {
+        return importModelsGroup(root, UpAxis.Y_UP);
+    }
+
+    public static List<SceneNode> importModelsGroup(SceneNode root, UpAxis upAxis) {
         String selectedPaths;
 
         try (MemoryStack stack = stackPush()) {
@@ -153,6 +165,10 @@ public class ModelImporter {
                 if (mesh != null && mesh.getMinBound() != null && mesh.getMaxBound() != null) {
                     groupMin.min(mesh.getMinBound());
                     groupMax.max(mesh.getMaxBound());
+                }
+
+                if (upAxis == UpAxis.Z_UP) {
+                    newNode.getLocalRotation().rotateX((float) Math.toRadians(-90));
                 }
 
                 resultNodes.add(newNode);
