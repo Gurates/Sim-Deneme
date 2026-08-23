@@ -56,6 +56,10 @@ public class ModelImporter {
                 mesh = ObjLoader.load(selectedPath);
             }
 
+            if (mesh != null) {
+                mesh.setSourcePath(selectedPath);
+            }
+
             File file = new File(selectedPath);
             String fileName = file.getName();
             int dotIdx = fileName.lastIndexOf('.');
@@ -147,6 +151,10 @@ public class ModelImporter {
                     mesh = ObjLoader.load(filePath);
                 }
 
+                if (mesh != null) {
+                    mesh.setSourcePath(filePath);
+                }
+
                 File file = new File(filePath);
                 String fileName = file.getName();
                 int dotIdx = fileName.lastIndexOf('.');
@@ -198,6 +206,98 @@ public class ModelImporter {
         }
 
         return resultNodes;
+    }
+
+    public static SceneNode importMultiMeshLink(SceneNode root) {
+        return importMultiMeshLink(root, UpAxis.Y_UP);
+    }
+
+    public static SceneNode importMultiMeshLink(SceneNode root, UpAxis upAxis) {
+        String selectedPaths;
+
+        try (MemoryStack stack = stackPush()) {
+            PointerBuffer filters = stack.mallocPointer(2);
+            filters.put(stack.UTF8("*.obj"));
+            filters.put(stack.UTF8("*.stl"));
+            filters.flip();
+
+            selectedPaths = TinyFileDialogs.tinyfd_openFileDialog(
+                    "Select 3D Models for Single Link",
+                    "",
+                    filters,
+                    "3D Model Files (*.obj, *.stl)",
+                    true
+            );
+        }
+
+        if (selectedPaths == null || selectedPaths.trim().isEmpty()) {
+            return null;
+        }
+
+        String[] filePaths = selectedPaths.split("\\|");
+        List<Mesh> meshes = new ArrayList<>();
+        Set<String> existingIds = new HashSet<>();
+        collectIds(root, existingIds);
+
+        String primaryId = null;
+
+        for (String filePath : filePaths) {
+            filePath = filePath.trim();
+            if (filePath.isEmpty()) continue;
+
+            try {
+                Mesh mesh;
+                String lower = filePath.toLowerCase();
+                if (lower.endsWith(".stl")) {
+                    mesh = StlLoader.load(filePath);
+                } else {
+                    mesh = ObjLoader.load(filePath);
+                }
+
+                if (mesh != null) {
+                    mesh.setSourcePath(filePath);
+                    meshes.add(mesh);
+                }
+
+                if (primaryId == null) {
+                    File file = new File(filePath);
+                    String fileName = file.getName();
+                    int dotIdx = fileName.lastIndexOf('.');
+                    primaryId = dotIdx > 0 ? fileName.substring(0, dotIdx) : fileName;
+                }
+            } catch (Exception e) {
+                e.printStackTrace();
+            }
+        }
+
+        if (meshes.isEmpty()) {
+            return null;
+        }
+
+        if (primaryId == null || primaryId.isEmpty()) {
+            primaryId = "multi_mesh_link";
+        }
+
+        String uniqueId = primaryId;
+        int counter = 1;
+        while (existingIds.contains(uniqueId)) {
+            uniqueId = primaryId + "_" + counter++;
+        }
+
+        SceneNode newNode = new SceneNode(uniqueId, meshes);
+        if (!meshes.isEmpty() && meshes.get(0).getSourcePath() != null) {
+            newNode.setSourceMeshPath(meshes.get(0).getSourcePath());
+        }
+
+        if (upAxis == UpAxis.Z_UP) {
+            newNode.getLocalRotation().rotateX((float) Math.toRadians(-90));
+        }
+
+        if (root != null) {
+            root.addChild(newNode);
+        }
+
+        return newNode;
     }
 
     private static void collectIds(SceneNode node, Set<String> ids) {

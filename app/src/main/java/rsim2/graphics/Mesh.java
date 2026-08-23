@@ -22,10 +22,16 @@ public class Mesh {
 
     private final float[] vertices;
     private final int[] indices;
+    private String sourcePath;
 
     public Mesh(float[] vertices, float[] normals, int[] indices) {
+        this(vertices, normals, indices, null);
+    }
+
+    public Mesh(float[] vertices, float[] normals, int[] indices, String sourcePath) {
         this.vertices = vertices;
         this.indices = indices;
+        this.sourcePath = sourcePath;
         this.vertexCount = indices != null ? indices.length : 0;
 
         minBound = new Vector3f(Float.MAX_VALUE, Float.MAX_VALUE, Float.MAX_VALUE);
@@ -97,6 +103,14 @@ public class Mesh {
 
     public int[] getIndices() {
         return indices;
+    }
+
+    public String getSourcePath() {
+        return sourcePath;
+    }
+
+    public void setSourcePath(String sourcePath) {
+        this.sourcePath = sourcePath;
     }
 
     public Vector3f getMinBound() {

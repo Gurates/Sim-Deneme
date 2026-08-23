@@ -43,7 +43,7 @@ public class Picker {
     }
 
     public static Vector3f raycastMeshSurface(float mouseX, float mouseY, int screenWidth, int screenHeight, Camera camera, SceneNode targetNode) {
-        if (targetNode == null || targetNode.getMesh() == null || camera == null || screenWidth <= 0 || screenHeight <= 0) {
+        if (targetNode == null || targetNode.getMeshes().isEmpty() || camera == null || screenWidth <= 0 || screenHeight <= 0) {
             return null;
         }
 
@@ -73,35 +73,38 @@ public class Picker {
         Vector4f locDir = invWorld.transform(new Vector4f(rayDir, 0.0f));
         Vector3f localRayDir = new Vector3f(locDir.x, locDir.y, locDir.z).normalize();
 
-        Mesh mesh = targetNode.getMesh();
-        float[] vertices = mesh.getVertices();
-        int[] indices = mesh.getIndices();
-
-        if (vertices == null || indices == null || indices.length < 3) {
-            return null;
-        }
-
         float minT = Float.MAX_VALUE;
         Vector3f v0 = new Vector3f();
         Vector3f v1 = new Vector3f();
         Vector3f v2 = new Vector3f();
 
-        for (int i = 0; i < indices.length; i += 3) {
-            int i0 = indices[i] * 3;
-            int i1 = indices[i + 1] * 3;
-            int i2 = indices[i + 2] * 3;
+        for (Mesh mesh : targetNode.getMeshes()) {
+            if (mesh == null) continue;
 
-            if (i0 + 2 >= vertices.length || i1 + 2 >= vertices.length || i2 + 2 >= vertices.length) {
+            float[] vertices = mesh.getVertices();
+            int[] indices = mesh.getIndices();
+
+            if (vertices == null || indices == null || indices.length < 3) {
                 continue;
             }
 
-            v0.set(vertices[i0], vertices[i0 + 1], vertices[i0 + 2]);
-            v1.set(vertices[i1], vertices[i1 + 1], vertices[i1 + 2]);
-            v2.set(vertices[i2], vertices[i2 + 1], vertices[i2 + 2]);
+            for (int i = 0; i < indices.length; i += 3) {
+                int i0 = indices[i] * 3;
+                int i1 = indices[i + 1] * 3;
+                int i2 = indices[i + 2] * 3;
 
-            float t = rayTriangleIntersect(localRayOrigin, localRayDir, v0, v1, v2);
-            if (t > 0.0f && t < minT) {
-                minT = t;
+                if (i0 + 2 >= vertices.length || i1 + 2 >= vertices.length || i2 + 2 >= vertices.length) {
+                    continue;
+                }
+
+                v0.set(vertices[i0], vertices[i0 + 1], vertices[i0 + 2]);
+                v1.set(vertices[i1], vertices[i1 + 1], vertices[i1 + 2]);
+                v2.set(vertices[i2], vertices[i2 + 1], vertices[i2 + 2]);
+
+                float t = rayTriangleIntersect(localRayOrigin, localRayDir, v0, v1, v2);
+                if (t > 0.0f && t < minT) {
+                    minT = t;
+                }
             }
         }
 
@@ -140,8 +143,10 @@ public class Picker {
     private static void traverseAndPick(SceneNode node, Vector3f rayOrigin, Vector3f rayDir, float[] minDistance, SceneNode[] bestNode) {
         if (node == null) return;
 
-        Mesh mesh = node.getMesh();
-        if (mesh != null && mesh.getMinBound() != null && mesh.getMaxBound() != null) {
+        if (!node.getMeshes().isEmpty()) {
+            Vector3f minBound = node.getCombinedBoundingBoxMin();
+            Vector3f maxBound = node.getCombinedBoundingBoxMax();
+
             Matrix4f invWorld = new Matrix4f(node.getWorldTransform()).invert();
 
             Vector4f locOrig = invWorld.transform(new Vector4f(rayOrigin, 1.0f));
@@ -151,7 +156,7 @@ public class Picker {
             Vector3f localDir = new Vector3f(locDir.x, locDir.y, locDir.z).normalize();
 
             Vector2f result = new Vector2f();
-            if (Intersectionf.intersectRayAab(localOrigin, localDir, mesh.getMinBound(), mesh.getMaxBound(), result)) {
+            if (Intersectionf.intersectRayAab(localOrigin, localDir, minBound, maxBound, result)) {
                 float dist = result.x;
                 if (dist < 0) dist = result.y;
                 if (dist >= 0 && dist < minDistance[0]) {

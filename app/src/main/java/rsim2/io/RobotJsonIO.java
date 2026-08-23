@@ -89,11 +89,31 @@ public class RobotJsonIO {
             LinkDTO link = new LinkDTO();
             link.id = node.getId();
 
-            String rawMeshPath = node.getSourceMeshPath() != null ? node.getSourceMeshPath() : "models/test.obj";
-            if (jsonFileDirectory != null && !jsonFileDirectory.isEmpty()) {
-                link.mesh = makeRelativePath(jsonFileDirectory, rawMeshPath);
+            List<String> meshPaths = new ArrayList<>();
+            for (Mesh m : node.getMeshes()) {
+                String rawPath = m.getSourcePath();
+                if (rawPath == null || rawPath.isEmpty()) {
+                    rawPath = node.getSourceMeshPath();
+                }
+                if (rawPath == null || rawPath.isEmpty()) {
+                    rawPath = "models/test.obj";
+                }
+
+                if (jsonFileDirectory != null && !jsonFileDirectory.isEmpty()) {
+                    meshPaths.add(makeRelativePath(jsonFileDirectory, rawPath));
+                } else {
+                    meshPaths.add(rawPath);
+                }
+            }
+
+            if (meshPaths.size() > 1) {
+                link.meshes = meshPaths;
+                link.mesh = meshPaths.get(0);
+            } else if (meshPaths.size() == 1) {
+                link.mesh = meshPaths.get(0);
+                link.meshes = meshPaths;
             } else {
-                link.mesh = rawMeshPath;
+                link.mesh = "models/test.obj";
             }
 
             link.mass = 1.0f;
@@ -173,19 +193,37 @@ public class RobotJsonIO {
         }
 
         for (LinkDTO link : def.links) {
-            String meshPath = link.mesh;
-            String resolvedMeshPath = resolveMeshPath(meshPath, jsonFileDirectory);
-
-            Mesh mesh;
-            String lower = resolvedMeshPath.toLowerCase();
-            if (lower.endsWith(".stl")) {
-                mesh = StlLoader.load(resolvedMeshPath);
-            } else {
-                mesh = ObjLoader.load(resolvedMeshPath);
+            List<String> rawPaths = new ArrayList<>();
+            if (link.meshes != null && !link.meshes.isEmpty()) {
+                rawPaths.addAll(link.meshes);
+            } else if (link.mesh != null && !link.mesh.isEmpty()) {
+                rawPaths.add(link.mesh);
             }
 
-            SceneNode node = new SceneNode(link.id, mesh);
-            node.setSourceMeshPath(resolvedMeshPath);
+            if (rawPaths.isEmpty()) {
+                rawPaths.add("models/test.obj");
+            }
+
+            List<Mesh> loadedMeshes = new ArrayList<>();
+            for (String rawPath : rawPaths) {
+                String resolved = resolveMeshPath(rawPath, jsonFileDirectory);
+                Mesh mesh;
+                String lower = resolved.toLowerCase();
+                if (lower.endsWith(".stl")) {
+                    mesh = StlLoader.load(resolved);
+                } else {
+                    mesh = ObjLoader.load(resolved);
+                }
+                if (mesh != null) {
+                    mesh.setSourcePath(resolved);
+                    loadedMeshes.add(mesh);
+                }
+            }
+
+            SceneNode node = new SceneNode(link.id, loadedMeshes);
+            if (!loadedMeshes.isEmpty() && loadedMeshes.get(0).getSourcePath() != null) {
+                node.setSourceMeshPath(loadedMeshes.get(0).getSourcePath());
+            }
 
             if (link.scale != null && link.scale.length >= 3) {
                 node.getLocalScale().set(link.scale[0], link.scale[1], link.scale[2]);

@@ -4,10 +4,9 @@ import imgui.ImGui;
 import imgui.flag.ImGuiCol;
 import imgui.flag.ImGuiCond;
 import imgui.flag.ImGuiWindowFlags;
-import org.joml.Matrix4f;
-import org.joml.Quaternionf;
-import org.joml.Vector3f;
 import rsim2.core.Engine;
+import rsim2.editor.commands.CommandHistory;
+import rsim2.editor.commands.DeleteJointCommand;
 import rsim2.scene.Joint;
 import rsim2.scene.SceneNode;
 
@@ -18,11 +17,13 @@ public class AllJointsPanel {
     private final Engine engine;
     private SceneNode rootNode;
     private List<Joint> allJoints;
+    private CommandHistory commandHistory;
 
-    public AllJointsPanel(Engine engine, SceneNode rootNode, List<Joint> allJoints) {
+    public AllJointsPanel(Engine engine, SceneNode rootNode, List<Joint> allJoints, CommandHistory commandHistory) {
         this.engine = engine;
         this.rootNode = rootNode;
         this.allJoints = allJoints != null ? allJoints : new ArrayList<>();
+        this.commandHistory = commandHistory;
     }
 
     public void setRootNode(SceneNode rootNode) {
@@ -31,6 +32,10 @@ public class AllJointsPanel {
 
     public void setJoints(List<Joint> allJoints) {
         this.allJoints = allJoints != null ? allJoints : new ArrayList<>();
+    }
+
+    public void setCommandHistory(CommandHistory commandHistory) {
+        this.commandHistory = commandHistory;
     }
 
     public void render() {
@@ -92,35 +97,17 @@ public class AllJointsPanel {
     private void deleteJoint(Joint joint) {
         if (joint == null) return;
 
-        SceneNode childNode = joint.getChildNode();
-        SceneNode parentNode = joint.getParentNode();
-
-        if (childNode != null) {
-            Matrix4f worldTransform = childNode.getWorldTransform();
-            Vector3f worldPos = new Vector3f();
-            worldTransform.getTranslation(worldPos);
-
-            Quaternionf worldRot = new Quaternionf();
-            worldTransform.getNormalizedRotation(worldRot);
-
-            Vector3f worldScale = new Vector3f();
-            worldTransform.getScale(worldScale);
-
-            if (childNode.getParent() != null && childNode.getParent() == parentNode) {
-                childNode.getParent().removeChild(childNode);
-                if (rootNode != null) {
-                    rootNode.addChild(childNode);
-                }
-                childNode.getLocalPosition().set(worldPos);
-                childNode.getLocalRotation().set(worldRot);
-                childNode.getLocalScale().set(worldScale);
+        if (commandHistory != null) {
+            commandHistory.executeAndRecord(new DeleteJointCommand(joint, allJoints, rootNode));
+        } else {
+            SceneNode childNode = joint.getChildNode();
+            if (childNode != null) {
+                childNode.reparentPreservingWorldTransform(rootNode);
             }
-        }
-
-        allJoints.remove(joint);
-
-        if (engine != null) {
-            engine.autoSaveProject();
+            allJoints.remove(joint);
+            if (engine != null) {
+                engine.autoSaveProject();
+            }
         }
     }
 }

@@ -1,6 +1,7 @@
 package rsim2.graphics;
 
 import org.joml.Matrix4f;
+import org.joml.Vector3f;
 import org.lwjgl.BufferUtils;
 import rsim2.camera.Camera;
 import rsim2.io.ObjLoader;
@@ -27,6 +28,8 @@ public class Renderer {
     private int modelProjectionLocation;
     private int modelViewLocation;
     private int modelModelLocation;
+    private int modelIsSelectedLocation;
+    private int modelCameraPosLocation;
 
     private Mesh testMesh;
     
@@ -92,11 +95,17 @@ public class Renderer {
         modelProjectionLocation = modelShaderProgram.getUniformLocation("projectionMatrix");
         modelViewLocation = modelShaderProgram.getUniformLocation("viewMatrix");
         modelModelLocation = modelShaderProgram.getUniformLocation("modelMatrix");
+        modelIsSelectedLocation = modelShaderProgram.getUniformLocation("isSelected");
+        modelCameraPosLocation = modelShaderProgram.getUniformLocation("cameraPos");
 
         testMesh = ObjLoader.load("/models/test.obj");
     }
 
     public void render(Camera camera, SceneNode rootNode) {
+        render(camera, rootNode, null);
+    }
+
+    public void render(Camera camera, SceneNode rootNode, SceneNode selectedNode) {
         renderGrid(camera);
 
         if (rootNode != null) {
@@ -110,23 +119,37 @@ public class Renderer {
             camera.getViewMatrix().get(viewBuffer);
             glUniformMatrix4fv(modelViewLocation, false, viewBuffer);
 
-            renderNode(rootNode);
+            Vector3f camPos = camera.getPosition();
+            if (modelCameraPosLocation >= 0 && camPos != null) {
+                glUniform3f(modelCameraPosLocation, camPos.x, camPos.y, camPos.z);
+            }
+
+            renderNode(rootNode, selectedNode);
 
             modelShaderProgram.unbind();
         }
     }
 
-    private void renderNode(SceneNode node) {
-        if (node.getMesh() != null) {
+    private void renderNode(SceneNode node, SceneNode selectedNode) {
+        if (!node.getMeshes().isEmpty()) {
             FloatBuffer modelBuffer = BufferUtils.createFloatBuffer(16);
             node.getWorldTransform().get(modelBuffer);
             glUniformMatrix4fv(modelModelLocation, false, modelBuffer);
 
-            node.getMesh().render();
+            boolean isSel = (node == selectedNode);
+            if (modelIsSelectedLocation >= 0) {
+                glUniform1i(modelIsSelectedLocation, isSel ? 1 : 0);
+            }
+
+            for (Mesh mesh : node.getMeshes()) {
+                if (mesh != null) {
+                    mesh.render();
+                }
+            }
         }
 
         for (SceneNode child : node.getChildren()) {
-            renderNode(child);
+            renderNode(child, selectedNode);
         }
     }
 

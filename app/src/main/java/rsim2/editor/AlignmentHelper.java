@@ -5,17 +5,17 @@ import rsim2.scene.SceneNode;
 public class AlignmentHelper {
 
     public static float getTopY(SceneNode node) {
-        if (node == null || node.getMesh() == null) {
+        if (node == null || node.getMeshes().isEmpty()) {
             return 0.0f;
         }
-        return node.getMesh().getBoundingBoxMax().y * node.getLocalScale().y;
+        return node.getCombinedBoundingBoxMax().y * node.getLocalScale().y;
     }
 
     public static float getBottomY(SceneNode node) {
-        if (node == null || node.getMesh() == null) {
+        if (node == null || node.getMeshes().isEmpty()) {
             return 0.0f;
         }
-        return node.getMesh().getBoundingBoxMin().y * node.getLocalScale().y;
+        return node.getCombinedBoundingBoxMin().y * node.getLocalScale().y;
     }
 
     public static void snapToTop(SceneNode parent, SceneNode child) {
@@ -30,17 +30,17 @@ public class AlignmentHelper {
         if (child == null) {
             return;
         }
-        if (parent == null || parent.getMesh() == null || child.getMesh() == null) {
+        if (parent == null || parent.getMeshes().isEmpty() || child.getMeshes().isEmpty()) {
             child.getLocalPosition().x = 0.0f;
             child.getLocalPosition().z = 0.0f;
             return;
         }
 
-        float parentCenterX = (parent.getMesh().getBoundingBoxMin().x + parent.getMesh().getBoundingBoxMax().x) / 2.0f * parent.getLocalScale().x;
-        float parentCenterZ = (parent.getMesh().getBoundingBoxMin().z + parent.getMesh().getBoundingBoxMax().z) / 2.0f * parent.getLocalScale().z;
+        float parentCenterX = (parent.getCombinedBoundingBoxMin().x + parent.getCombinedBoundingBoxMax().x) / 2.0f * parent.getLocalScale().x;
+        float parentCenterZ = (parent.getCombinedBoundingBoxMin().z + parent.getCombinedBoundingBoxMax().z) / 2.0f * parent.getLocalScale().z;
 
-        float childCenterX = (child.getMesh().getBoundingBoxMin().x + child.getMesh().getBoundingBoxMax().x) / 2.0f * child.getLocalScale().x;
-        float childCenterZ = (child.getMesh().getBoundingBoxMin().z + child.getMesh().getBoundingBoxMax().z) / 2.0f * child.getLocalScale().z;
+        float childCenterX = (child.getCombinedBoundingBoxMin().x + child.getCombinedBoundingBoxMax().x) / 2.0f * child.getLocalScale().x;
+        float childCenterZ = (child.getCombinedBoundingBoxMin().z + child.getCombinedBoundingBoxMax().z) / 2.0f * child.getLocalScale().z;
 
         child.getLocalPosition().x = parentCenterX - childCenterX;
         child.getLocalPosition().z = parentCenterZ - childCenterZ;

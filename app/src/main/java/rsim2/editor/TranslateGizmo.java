@@ -5,6 +5,8 @@ import org.joml.Vector2f;
 import org.joml.Vector3f;
 import org.lwjgl.BufferUtils;
 import rsim2.camera.Camera;
+import rsim2.editor.commands.CommandHistory;
+import rsim2.editor.commands.TransformCommand;
 import rsim2.graphics.ShaderProgram;
 import rsim2.scene.SceneNode;
 
@@ -20,11 +22,13 @@ public class TranslateGizmo {
     public static final float GIZMO_PICK_THRESHOLD_PX = 15.0f;
     public static final float GRID_SNAP_SIZE = 0.05f;
 
+    private CommandHistory commandHistory;
     private SceneNode targetNode;
     private boolean isDragging = false;
     private int activeAxis = -1;
     private final Vector2f dragStartMouse = new Vector2f();
     private float dragStartValue = 0.0f;
+    private final Vector3f dragStartPosition = new Vector3f();
 
     private ShaderProgram gizmoShader;
     private int projLoc;
@@ -38,9 +42,12 @@ public class TranslateGizmo {
     private int markerVao;
     private int markerVbo;
 
+    private int boxVao;
+    private int boxVbo;
+
     private final Matrix4f modelMatrix = new Matrix4f();
 
-    private final float[] lineVertices = new float[]{
+    private final float[] lineVertices = new float[] {
             0.0f, 0.0f, 0.0f,
             GIZMO_LENGTH, 0.0f, 0.0f,
             0.0f, 0.0f, 0.0f,
@@ -48,6 +55,10 @@ public class TranslateGizmo {
             0.0f, 0.0f, 0.0f,
             0.0f, 0.0f, GIZMO_LENGTH
     };
+
+    public void setCommandHistory(CommandHistory commandHistory) {
+        this.commandHistory = commandHistory;
+    }
 
     public void init() throws Exception {
         gizmoShader = new ShaderProgram();
@@ -77,14 +88,15 @@ public class TranslateGizmo {
         glBindVertexArray(0);
 
         setupMarkerMesh();
+        setupBoxMesh();
     }
 
     private void setupMarkerMesh() {
         float s = 0.08f;
-        float[] markerVerts = new float[]{
-                -s, 0.0f, 0.0f,  s, 0.0f, 0.0f,
-                0.0f, -s, 0.0f,  0.0f, s, 0.0f,
-                0.0f, 0.0f, -s,  0.0f, 0.0f, s
+        float[] markerVerts = new float[] {
+                -s, 0.0f, 0.0f, s, 0.0f, 0.0f,
+                0.0f, -s, 0.0f, 0.0f, s, 0.0f,
+                0.0f, 0.0f, -s, 0.0f, 0.0f, s
         };
         markerVao = glGenVertexArrays();
         glBindVertexArray(markerVao);
@@ -101,6 +113,57 @@ public class TranslateGizmo {
 
         glBindBuffer(GL_ARRAY_BUFFER, 0);
         glBindVertexArray(0);
+    }
+
+    private void setupBoxMesh() {
+        float[] boxVerts = new float[] {
+                0.0f, 0.0f, 0.0f, 1.0f, 0.0f, 0.0f,
+                1.0f, 0.0f, 0.0f, 1.0f, 0.0f, 1.0f,
+                1.0f, 0.0f, 1.0f, 0.0f, 0.0f, 1.0f,
+                0.0f, 0.0f, 1.0f, 0.0f, 0.0f, 0.0f,
+
+                0.0f, 1.0f, 0.0f, 1.0f, 1.0f, 0.0f,
+                1.0f, 1.0f, 0.0f, 1.0f, 1.0f, 1.0f,
+                1.0f, 1.0f, 1.0f, 0.0f, 1.0f, 1.0f,
+                0.0f, 1.0f, 1.0f, 0.0f, 1.0f, 0.0f,
+
+                0.0f, 0.0f, 0.0f, 0.0f, 1.0f, 0.0f,
+                1.0f, 0.0f, 0.0f, 1.0f, 1.0f, 0.0f,
+                1.0f, 0.0f, 1.0f, 1.0f, 1.0f, 1.0f,
+                0.0f, 0.0f, 1.0f, 0.0f, 1.0f, 1.0f
+        };
+
+        boxVao = glGenVertexArrays();
+        glBindVertexArray(boxVao);
+
+        FloatBuffer buffer = BufferUtils.createFloatBuffer(boxVerts.length);
+        buffer.put(boxVerts).flip();
+
+        boxVbo = glGenBuffers();
+        glBindBuffer(GL_ARRAY_BUFFER, boxVbo);
+        glBufferData(GL_ARRAY_BUFFER, buffer, GL_STATIC_DRAW);
+
+        glVertexAttribPointer(0, 3, GL_FLOAT, false, 3 * Float.BYTES, 0);
+        glEnableVertexAttribArray(0);
+
+        glBindBuffer(GL_ARRAY_BUFFER, 0);
+        glBindVertexArray(0);
+    }
+
+    public Vector3f getGizmoWorldOrigin() {
+        if (targetNode == null) {
+            return new Vector3f();
+        }
+        Vector3f worldPos = new Vector3f();
+        if (!targetNode.getMeshes().isEmpty()) {
+            Vector3f min = targetNode.getCombinedBoundingBoxMin();
+            Vector3f max = targetNode.getCombinedBoundingBoxMax();
+            Vector3f localCenter = new Vector3f(min).add(max).mul(0.5f);
+            targetNode.getWorldTransform().transformPosition(localCenter, worldPos);
+        } else {
+            targetNode.getWorldTransform().getTranslation(worldPos);
+        }
+        return worldPos;
     }
 
     public void setTargetNode(SceneNode targetNode) {
@@ -128,8 +191,9 @@ public class TranslateGizmo {
             return;
         }
 
-        Vector3f worldPos = new Vector3f();
-        targetNode.getWorldTransform().getTranslation(worldPos);
+        renderSelectionBounds(camera);
+
+        Vector3f worldPos = getGizmoWorldOrigin();
 
         modelMatrix.identity().translation(worldPos);
 
@@ -180,6 +244,53 @@ public class TranslateGizmo {
         glEnable(GL_DEPTH_TEST);
     }
 
+    public void renderSelectionBounds(Camera camera) {
+        if (targetNode == null || targetNode.getMeshes().isEmpty() || gizmoShader == null || boxVao == 0) {
+            return;
+        }
+
+        Vector3f min = targetNode.getCombinedBoundingBoxMin();
+        Vector3f max = targetNode.getCombinedBoundingBoxMax();
+        Vector3f size = new Vector3f(max).sub(min);
+
+        if (size.x < 0.0001f && size.y < 0.0001f && size.z < 0.0001f) {
+            return;
+        }
+
+        Matrix4f boxModel = new Matrix4f(targetNode.getWorldTransform())
+                .translate(min)
+                .scale(size);
+
+        glDisable(GL_DEPTH_TEST);
+        glLineWidth(2.0f);
+
+        gizmoShader.bind();
+
+        FloatBuffer projBuf = BufferUtils.createFloatBuffer(16);
+        camera.getProjectionMatrix().get(projBuf);
+        glUniformMatrix4fv(projLoc, false, projBuf);
+
+        FloatBuffer viewBuf = BufferUtils.createFloatBuffer(16);
+        camera.getViewMatrix().get(viewBuf);
+        glUniformMatrix4fv(viewLoc, false, viewBuf);
+
+        FloatBuffer modelBuf = BufferUtils.createFloatBuffer(16);
+        boxModel.get(modelBuf);
+        glUniformMatrix4fv(modelLoc, false, modelBuf);
+
+        // Electric cyan wireframe highlight
+        glUniform4f(colorLoc, 0.15f, 0.85f, 1.0f, 0.9f);
+
+        glBindVertexArray(boxVao);
+        glDrawArrays(GL_LINES, 0, 24);
+        glBindVertexArray(0);
+
+        gizmoShader.unbind();
+
+        glLineWidth(1.0f);
+        glEnable(GL_DEPTH_TEST);
+    }
+
     public void renderPointMarker(Vector3f worldPos, Camera camera, float r, float g, float b) {
         if (worldPos == null || gizmoShader == null) {
             return;
@@ -221,15 +332,14 @@ public class TranslateGizmo {
             return -1;
         }
 
-        Vector3f origin = new Vector3f();
-        targetNode.getWorldTransform().getTranslation(origin);
+        Vector3f origin = getGizmoWorldOrigin();
 
         Vector2f originScreen = projectToScreen(origin, camera, screenWidth, screenHeight);
         if (originScreen == null) {
             return -1;
         }
 
-        Vector3f[] axes = new Vector3f[]{
+        Vector3f[] axes = new Vector3f[] {
                 new Vector3f(1.0f, 0.0f, 0.0f),
                 new Vector3f(0.0f, 1.0f, 0.0f),
                 new Vector3f(0.0f, 0.0f, 1.0f)
@@ -245,7 +355,8 @@ public class TranslateGizmo {
                 continue;
             }
 
-            float dist = pointToSegmentDistance(mouseX, mouseY, originScreen.x, originScreen.y, endScreen.x, endScreen.y);
+            float dist = pointToSegmentDistance(mouseX, mouseY, originScreen.x, originScreen.y, endScreen.x,
+                    endScreen.y);
             if (dist < minDistance) {
                 minDistance = dist;
                 closestAxis = i;
@@ -261,11 +372,15 @@ public class TranslateGizmo {
             isDragging = true;
             activeAxis = picked;
             dragStartMouse.set(mouseX, mouseY);
+            dragStartPosition.set(targetNode.getLocalPosition());
 
             Vector3f pos = targetNode.getLocalPosition();
-            if (activeAxis == 0) dragStartValue = pos.x;
-            else if (activeAxis == 1) dragStartValue = pos.y;
-            else if (activeAxis == 2) dragStartValue = pos.z;
+            if (activeAxis == 0)
+                dragStartValue = pos.x;
+            else if (activeAxis == 1)
+                dragStartValue = pos.y;
+            else if (activeAxis == 2)
+                dragStartValue = pos.z;
 
             return true;
         }
@@ -277,13 +392,15 @@ public class TranslateGizmo {
             return;
         }
 
-        Vector3f origin = new Vector3f();
-        targetNode.getWorldTransform().getTranslation(origin);
+        Vector3f origin = getGizmoWorldOrigin();
 
         Vector3f axisDir = new Vector3f();
-        if (activeAxis == 0) axisDir.set(1.0f, 0.0f, 0.0f);
-        else if (activeAxis == 1) axisDir.set(0.0f, 1.0f, 0.0f);
-        else if (activeAxis == 2) axisDir.set(0.0f, 0.0f, 1.0f);
+        if (activeAxis == 0)
+            axisDir.set(1.0f, 0.0f, 0.0f);
+        else if (activeAxis == 1)
+            axisDir.set(0.0f, 1.0f, 0.0f);
+        else if (activeAxis == 2)
+            axisDir.set(0.0f, 0.0f, 1.0f);
 
         Vector2f p0 = projectToScreen(origin, camera, screenWidth, screenHeight);
         Vector2f p1 = projectToScreen(new Vector3f(origin).add(axisDir), camera, screenWidth, screenHeight);
@@ -307,12 +424,23 @@ public class TranslateGizmo {
         float snappedValue = Math.round(rawValue / GRID_SNAP_SIZE) * GRID_SNAP_SIZE;
 
         Vector3f localPos = targetNode.getLocalPosition();
-        if (activeAxis == 0) localPos.x = snappedValue;
-        else if (activeAxis == 1) localPos.y = snappedValue;
-        else if (activeAxis == 2) localPos.z = snappedValue;
+        if (activeAxis == 0)
+            localPos.x = snappedValue;
+        else if (activeAxis == 1)
+            localPos.y = snappedValue;
+        else if (activeAxis == 2)
+            localPos.z = snappedValue;
     }
 
     public void onMouseUp() {
+        if (isDragging && targetNode != null) {
+            if (!dragStartPosition.equals(targetNode.getLocalPosition())) {
+                if (commandHistory != null) {
+                    commandHistory.recordExecuted(
+                            new TransformCommand(targetNode, dragStartPosition, targetNode.getLocalPosition()));
+                }
+            }
+        }
         isDragging = false;
         activeAxis = -1;
     }
@@ -325,7 +453,7 @@ public class TranslateGizmo {
         }
 
         Matrix4f viewProj = new Matrix4f(camera.getProjectionMatrix()).mul(camera.getViewMatrix());
-        int[] viewport = new int[]{0, 0, screenWidth, screenHeight};
+        int[] viewport = new int[] { 0, 0, screenWidth, screenHeight };
         Vector3f winCoords = new Vector3f();
         viewProj.project(worldPos.x, worldPos.y, worldPos.z, viewport, winCoords);
 
@@ -349,9 +477,17 @@ public class TranslateGizmo {
         if (gizmoShader != null) {
             gizmoShader.cleanup();
         }
-        if (vao != 0) glDeleteVertexArrays(vao);
-        if (vbo != 0) glDeleteBuffers(vbo);
-        if (markerVao != 0) glDeleteVertexArrays(markerVao);
-        if (markerVbo != 0) glDeleteBuffers(markerVbo);
+        if (vao != 0)
+            glDeleteVertexArrays(vao);
+        if (vbo != 0)
+            glDeleteBuffers(vbo);
+        if (markerVao != 0)
+            glDeleteVertexArrays(markerVao);
+        if (markerVbo != 0)
+            glDeleteBuffers(markerVbo);
+        if (boxVao != 0)
+            glDeleteVertexArrays(boxVao);
+        if (boxVbo != 0)
+            glDeleteBuffers(boxVbo);
     }
 }

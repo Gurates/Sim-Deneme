@@ -12,9 +12,12 @@ import rsim2.editor.Picker;
 import rsim2.editor.PointAlignTool;
 import rsim2.editor.SelectionManager;
 import rsim2.editor.TranslateGizmo;
+import rsim2.editor.commands.CommandHistory;
+import rsim2.editor.commands.DeleteNodeCommand;
 import rsim2.graphics.Renderer;
 import rsim2.input.Input;
 import rsim2.io.RobotJsonIO;
+import rsim2.io.UrdfLoader;
 import rsim2.scene.Joint;
 import rsim2.scene.SceneNode;
 import rsim2.ui.*;
@@ -43,6 +46,7 @@ public class Engine {
     private Camera camera;
     private TranslateGizmo translateGizmo;
     private PointAlignTool pointAlignTool;
+    private CommandHistory commandHistory;
 
     private ImGuiLayer imguiLayer;
     private SelectionManager selectionManager;
@@ -56,6 +60,8 @@ public class Engine {
     private String currentProjectPath = null;
     private long lastAutoSaveTime = 0;
     private String lastAutoSaveMessage = "";
+
+    private int fpsLimit = 60;
 
     public void run() {
         System.out.println("Starting Engine...");
@@ -131,7 +137,7 @@ public class Engine {
         }
 
         glfwMakeContextCurrent(window);
-        glfwSwapInterval(1);
+        glfwSwapInterval(0); // vsync off 1= on
         glfwShowWindow(window);
 
         GL.createCapabilities();
@@ -147,6 +153,8 @@ public class Engine {
         renderer = new Renderer();
         translateGizmo = new TranslateGizmo();
         pointAlignTool = new PointAlignTool();
+        commandHistory = new CommandHistory(this::autoSaveProject);
+        translateGizmo.setCommandHistory(commandHistory);
 
         try {
             renderer.init();
@@ -165,10 +173,10 @@ public class Engine {
         joints = new ArrayList<>();
         currentProjectPath = null;
 
-        toolbarPanel = new ToolbarPanel(this, rootNode, selectionManager);
+        toolbarPanel = new ToolbarPanel(this, rootNode, selectionManager, commandHistory);
         hierarchyPanel = new HierarchyPanel(rootNode, selectionManager);
-        allJointsPanel = new AllJointsPanel(this, rootNode, joints);
-        inspectorPanel = new InspectorPanel(this, rootNode, selectionManager, joints, pointAlignTool);
+        allJointsPanel = new AllJointsPanel(this, rootNode, joints, commandHistory);
+        inspectorPanel = new InspectorPanel(this, rootNode, selectionManager, joints, pointAlignTool, commandHistory);
     }
 
     public void loadProject(String filePath) {
@@ -192,6 +200,9 @@ public class Engine {
             if (pointAlignTool != null) {
                 pointAlignTool.clearPoints();
             }
+            if (commandHistory != null) {
+                commandHistory.clear();
+            }
 
             if (selectionManager != null) {
                 selectionManager.clearSelection();
@@ -201,16 +212,72 @@ public class Engine {
             }
             if (toolbarPanel != null) {
                 toolbarPanel.setRootNode(this.rootNode);
+                toolbarPanel.setCommandHistory(this.commandHistory);
             }
             if (allJointsPanel != null) {
                 allJointsPanel.setRootNode(this.rootNode);
                 allJointsPanel.setJoints(this.joints);
+                allJointsPanel.setCommandHistory(this.commandHistory);
             }
             if (inspectorPanel != null) {
                 inspectorPanel.setRootNode(this.rootNode);
                 inspectorPanel.setJoints(this.joints);
                 inspectorPanel.setPointAlignTool(this.pointAlignTool);
+                inspectorPanel.setCommandHistory(this.commandHistory);
             }
+        } catch (Exception e) {
+            e.printStackTrace();
+        }
+    }
+
+    public void loadUrdf(String filePath) {
+        try {
+            System.out.println("Loading URDF robot from: " + filePath);
+            UrdfLoader.UrdfResult res = UrdfLoader.load(filePath, true);
+
+            if (this.rootNode != null) {
+                this.rootNode.cleanup();
+            }
+
+            this.rootNode = res.rootNode != null ? res.rootNode : new SceneNode("world");
+            this.joints = res.joints != null ? res.joints : new ArrayList<>();
+
+            File urdfFile = new File(filePath);
+            File autoSaveJson = new File(urdfFile.getParentFile(), "robot.json");
+            this.currentProjectPath = autoSaveJson.getAbsolutePath();
+
+            if (pointAlignTool != null) {
+                pointAlignTool.clearPoints();
+            }
+            if (commandHistory != null) {
+                commandHistory.clear();
+            }
+            if (selectionManager != null) {
+                selectionManager.clearSelection();
+                if (this.rootNode != null) {
+                    selectionManager.select(this.rootNode);
+                }
+            }
+            if (hierarchyPanel != null) {
+                hierarchyPanel.setRootNode(this.rootNode);
+            }
+            if (toolbarPanel != null) {
+                toolbarPanel.setRootNode(this.rootNode);
+                toolbarPanel.setCommandHistory(this.commandHistory);
+            }
+            if (allJointsPanel != null) {
+                allJointsPanel.setRootNode(this.rootNode);
+                allJointsPanel.setJoints(this.joints);
+                allJointsPanel.setCommandHistory(this.commandHistory);
+            }
+            if (inspectorPanel != null) {
+                inspectorPanel.setRootNode(this.rootNode);
+                inspectorPanel.setJoints(this.joints);
+                inspectorPanel.setPointAlignTool(this.pointAlignTool);
+                inspectorPanel.setCommandHistory(this.commandHistory);
+            }
+
+            autoSaveProject();
         } catch (Exception e) {
             e.printStackTrace();
         }
@@ -254,23 +321,29 @@ public class Engine {
             return;
         }
 
-        Set<SceneNode> nodesToRemove = new HashSet<>();
-        collectSubtree(node, nodesToRemove);
+        if (commandHistory != null) {
+            commandHistory.executeAndRecord(new DeleteNodeCommand(node, joints, selectionManager));
+        } else {
+            Set<SceneNode> nodesToRemove = new HashSet<>();
+            collectSubtree(node, nodesToRemove);
 
-        if (joints != null) {
-            joints.removeIf(j -> nodesToRemove.contains(j.getChildNode()) || nodesToRemove.contains(j.getParentNode()));
+            if (joints != null) {
+                joints.removeIf(
+                        j -> nodesToRemove.contains(j.getChildNode()) || nodesToRemove.contains(j.getParentNode()));
+            }
+
+            if (selectionManager != null && nodesToRemove.contains(selectionManager.getSelected())) {
+                selectionManager.clearSelection();
+            }
+
+            node.getParent().removeChild(node);
+            node.cleanup();
         }
-
-        if (selectionManager != null && nodesToRemove.contains(selectionManager.getSelected())) {
-            selectionManager.clearSelection();
-        }
-
-        node.getParent().removeChild(node);
-        node.cleanup();
     }
 
     private void collectSubtree(SceneNode current, Set<SceneNode> collected) {
-        if (current == null) return;
+        if (current == null)
+            return;
         collected.add(current);
         for (SceneNode child : current.getChildren()) {
             collectSubtree(child, collected);
@@ -299,6 +372,10 @@ public class Engine {
 
     public List<Joint> getJoints() {
         return joints;
+    }
+
+    public CommandHistory getCommandHistory() {
+        return commandHistory;
     }
 
     private void loop() {
@@ -330,10 +407,32 @@ public class Engine {
                 translateGizmo.setTargetNode(gizmoTarget);
             }
 
-            if (input.isKeyPressed(GLFW_KEY_DELETE)) {
-                SceneNode selected = selectionManager != null ? selectionManager.getSelected() : null;
-                if (selected != null) {
-                    deleteNode(selected);
+            boolean wantCaptureKeyboard = false;
+            try {
+                wantCaptureKeyboard = ImGui.getIO().getWantCaptureKeyboard();
+            } catch (Throwable ignored) {
+            }
+
+            if (!wantCaptureKeyboard) {
+                boolean isCtrlDown = input.isKeyDown(GLFW_KEY_LEFT_CONTROL) || input.isKeyDown(GLFW_KEY_RIGHT_CONTROL);
+                boolean isShiftDown = input.isKeyDown(GLFW_KEY_LEFT_SHIFT) || input.isKeyDown(GLFW_KEY_RIGHT_SHIFT);
+
+                if (isCtrlDown && !isShiftDown && input.isKeyPressed(GLFW_KEY_Z)) {
+                    if (commandHistory != null) {
+                        commandHistory.undo();
+                    }
+                } else if ((isCtrlDown && input.isKeyPressed(GLFW_KEY_Y))
+                        || (isCtrlDown && isShiftDown && input.isKeyPressed(GLFW_KEY_Z))) {
+                    if (commandHistory != null) {
+                        commandHistory.redo();
+                    }
+                }
+
+                if (input.isKeyPressed(GLFW_KEY_DELETE)) {
+                    SceneNode selected = selectionManager != null ? selectionManager.getSelected() : null;
+                    if (selected != null) {
+                        deleteNode(selected);
+                    }
                 }
             }
 
@@ -350,11 +449,13 @@ public class Engine {
                     } else {
                         boolean pickedGizmo = false;
                         if (translateGizmo != null) {
-                            pickedGizmo = translateGizmo.onMouseDown(input.getMouseX(), input.getMouseY(), camera, width, height);
+                            pickedGizmo = translateGizmo.onMouseDown(input.getMouseX(), input.getMouseY(), camera,
+                                    width, height);
                         }
 
                         if (!pickedGizmo) {
-                            SceneNode picked = Picker.pick(input.getMouseX(), input.getMouseY(), width, height, camera, rootNode);
+                            SceneNode picked = Picker.pick(input.getMouseX(), input.getMouseY(), width, height, camera,
+                                    rootNode);
                             if (picked != null && selectionManager != null) {
                                 selectionManager.select(picked);
                             }
@@ -386,10 +487,12 @@ public class Engine {
 
                 if (pointAlignTool != null) {
                     if (pointAlignTool.getPickedParentPointWorld() != null) {
-                        translateGizmo.renderPointMarker(pointAlignTool.getPickedParentPointWorld(), camera, 1.0f, 0.55f, 0.0f);
+                        translateGizmo.renderPointMarker(pointAlignTool.getPickedParentPointWorld(), camera, 1.0f,
+                                0.55f, 0.0f);
                     }
                     if (pointAlignTool.getPickedChildPointWorld() != null) {
-                        translateGizmo.renderPointMarker(pointAlignTool.getPickedChildPointWorld(), camera, 0.85f, 0.25f, 0.95f);
+                        translateGizmo.renderPointMarker(pointAlignTool.getPickedChildPointWorld(), camera, 0.85f,
+                                0.25f, 0.95f);
                     }
                 }
             }
@@ -414,6 +517,28 @@ public class Engine {
 
             glfwSwapBuffers(window);
             glfwPollEvents();
+
+            // fps limit
+            if (fpsLimit > 0) {
+                double targetFrameTime = 1.0 / fpsLimit;
+
+                while (true) {
+                    double elapsed = (System.nanoTime() - now) / 1_000_000_000.0;
+                    double remaining = targetFrameTime - elapsed;
+                    if (remaining <= 0) {
+                        break;
+                    }
+
+                    if (remaining > 0.002) {
+                        try {
+                            Thread.sleep(1);
+                        } catch (InterruptedException ignored) {
+                        }
+                    } else {
+                        Thread.onSpinWait();
+                    }
+                }
+            }
         }
 
         if (translateGizmo != null) {

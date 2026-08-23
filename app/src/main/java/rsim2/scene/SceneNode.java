@@ -10,7 +10,7 @@ import java.util.List;
 
 public class SceneNode {
     private String id;
-    private Mesh mesh;
+    private final List<Mesh> meshes = new ArrayList<>();
     private String sourceMeshPath;
     private final Vector3f localPosition;
     private final Quaternionf localRotation;
@@ -19,12 +19,25 @@ public class SceneNode {
     private final List<SceneNode> children;
 
     public SceneNode(String id) {
-        this(id, null);
+        this(id, (Mesh) null);
     }
 
     public SceneNode(String id, Mesh mesh) {
         this.id = id;
-        this.mesh = mesh;
+        if (mesh != null) {
+            this.meshes.add(mesh);
+        }
+        this.localPosition = new Vector3f();
+        this.localRotation = new Quaternionf();
+        this.localScale = new Vector3f(1.0f, 1.0f, 1.0f);
+        this.children = new ArrayList<>();
+    }
+
+    public SceneNode(String id, List<Mesh> meshes) {
+        this.id = id;
+        if (meshes != null) {
+            this.meshes.addAll(meshes);
+        }
         this.localPosition = new Vector3f();
         this.localRotation = new Quaternionf();
         this.localScale = new Vector3f(1.0f, 1.0f, 1.0f);
@@ -78,8 +91,23 @@ public class SceneNode {
     }
 
     public void addChild(SceneNode child) {
+        if (child == null) return;
         child.setParent(this);
         children.add(child);
+    }
+
+    public void addChild(int index, SceneNode child) {
+        if (child == null) return;
+        child.setParent(this);
+        if (index >= 0 && index <= children.size()) {
+            children.add(index, child);
+        } else {
+            children.add(child);
+        }
+    }
+
+    public int indexOfChild(SceneNode child) {
+        return children.indexOf(child);
     }
 
     public boolean removeChild(SceneNode child) {
@@ -91,8 +119,10 @@ public class SceneNode {
     }
 
     public void cleanup() {
-        if (mesh != null) {
-            mesh.cleanup();
+        for (Mesh mesh : meshes) {
+            if (mesh != null) {
+                mesh.cleanup();
+            }
         }
         for (SceneNode child : children) {
             child.cleanup();
@@ -107,12 +137,67 @@ public class SceneNode {
         this.id = id;
     }
 
+    public List<Mesh> getMeshes() {
+        return meshes;
+    }
+
+    public void addMesh(Mesh m) {
+        if (m != null) {
+            meshes.add(m);
+        }
+    }
+
+    public void clearMeshes() {
+        meshes.clear();
+    }
+
     public Mesh getMesh() {
-        return mesh;
+        return meshes.isEmpty() ? null : meshes.get(0);
+    }
+
+    public Mesh getPrimaryMesh() {
+        return meshes.isEmpty() ? null : meshes.get(0);
     }
 
     public void setMesh(Mesh mesh) {
-        this.mesh = mesh;
+        meshes.clear();
+        if (mesh != null) {
+            meshes.add(mesh);
+        }
+    }
+
+    public Vector3f getCombinedBoundingBoxMin() {
+        if (meshes.isEmpty()) {
+            return new Vector3f(0.0f, 0.0f, 0.0f);
+        }
+        Vector3f min = new Vector3f(Float.MAX_VALUE, Float.MAX_VALUE, Float.MAX_VALUE);
+        for (Mesh m : meshes) {
+            if (m != null && m.getMinBound() != null) {
+                min.min(m.getMinBound());
+            }
+        }
+        return min.x == Float.MAX_VALUE ? new Vector3f(0.0f, 0.0f, 0.0f) : min;
+    }
+
+    public Vector3f getCombinedBoundingBoxMax() {
+        if (meshes.isEmpty()) {
+            return new Vector3f(0.0f, 0.0f, 0.0f);
+        }
+        Vector3f max = new Vector3f(-Float.MAX_VALUE, -Float.MAX_VALUE, -Float.MAX_VALUE);
+        for (Mesh m : meshes) {
+            if (m != null && m.getMaxBound() != null) {
+                max.max(m.getMaxBound());
+            }
+        }
+        return max.x == -Float.MAX_VALUE ? new Vector3f(0.0f, 0.0f, 0.0f) : max;
+    }
+
+    public Vector3f getBoundingBoxMin() {
+        return getCombinedBoundingBoxMin();
+    }
+
+    public Vector3f getBoundingBoxMax() {
+        return getCombinedBoundingBoxMax();
     }
 
     public String getSourceMeshPath() {

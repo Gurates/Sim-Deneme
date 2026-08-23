@@ -11,6 +11,8 @@ import rsim2.core.Engine;
 import rsim2.editor.ModelImporter;
 import rsim2.editor.SelectionManager;
 import rsim2.editor.UpAxis;
+import rsim2.editor.commands.CommandHistory;
+import rsim2.editor.commands.ImportModelCommand;
 import rsim2.scene.SceneNode;
 
 import java.util.List;
@@ -21,18 +23,25 @@ public class ToolbarPanel {
     private final Engine engine;
     private SceneNode rootNode;
     private final SelectionManager selectionManager;
+    private CommandHistory commandHistory;
 
-    private final ImInt selectedUpAxisIdx = new ImInt(0);
-    private boolean isGroupImportPending = false;
+    private final ImInt selectedUpAxisIdx = new ImInt(0); // 0 = Y-up, 1 = Z-up
+    private int importTypePending = 0; // 0 = Single, 1 = Group, 2 = Multi-Part Link
 
-    public ToolbarPanel(Engine engine, SceneNode rootNode, SelectionManager selectionManager) {
+    public ToolbarPanel(Engine engine, SceneNode rootNode, SelectionManager selectionManager,
+            CommandHistory commandHistory) {
         this.engine = engine;
         this.rootNode = rootNode;
         this.selectionManager = selectionManager;
+        this.commandHistory = commandHistory;
     }
 
     public void setRootNode(SceneNode rootNode) {
         this.rootNode = rootNode;
+    }
+
+    public void setCommandHistory(CommandHistory commandHistory) {
+        this.commandHistory = commandHistory;
     }
 
     public void render() {
@@ -49,13 +58,15 @@ public class ToolbarPanel {
 
         ImGui.begin("Toolbar", flags);
 
-        if (ImGui.button("Load Project", 110.0f, 24.0f)) {
+        // Project File Operations
+        if (ImGui.button("Load Project", 95.0f, 24.0f)) {
             try (MemoryStack stack = stackPush()) {
                 PointerBuffer filters = stack.mallocPointer(1);
                 filters.put(stack.UTF8("*.json"));
                 filters.flip();
 
-                String path = TinyFileDialogs.tinyfd_openFileDialog("Load Project", "", filters, "JSON Files (*.json)", false);
+                String path = TinyFileDialogs.tinyfd_openFileDialog("Load Project", "", filters, "JSON Files (*.json)",
+                        false);
                 if (path != null && !path.trim().isEmpty()) {
                     engine.loadProject(path);
                 }
@@ -63,7 +74,7 @@ public class ToolbarPanel {
         }
 
         ImGui.sameLine();
-        if (ImGui.button("Save Project", 110.0f, 24.0f)) {
+        if (ImGui.button("Save Project", 95.0f, 24.0f)) {
             String currentPath = engine.getCurrentProjectPath();
             if (currentPath != null && !currentPath.trim().isEmpty()) {
                 engine.saveProject(currentPath);
@@ -73,7 +84,7 @@ public class ToolbarPanel {
         }
 
         ImGui.sameLine();
-        if (ImGui.button("Save Project As", 130.0f, 24.0f)) {
+        if (ImGui.button("Save As", 65.0f, 24.0f)) {
             saveProjectAs();
         }
 
@@ -81,17 +92,85 @@ public class ToolbarPanel {
         ImGui.textDisabled("|");
         ImGui.sameLine();
 
-        if (ImGui.button("Import Model", 120.0f, 24.0f)) {
-            isGroupImportPending = false;
-            ImGui.openPopup("Import 3D Model");
+        // Undo / Redo Buttons
+        boolean canUndo = commandHistory != null && commandHistory.canUndo();
+        ImGui.beginDisabled(!canUndo);
+        if (ImGui.button("Undo", 55.0f, 24.0f)) {
+            if (commandHistory != null) {
+                commandHistory.undo();
+            }
+        }
+        ImGui.endDisabled();
+
+        ImGui.sameLine();
+        boolean canRedo = commandHistory != null && commandHistory.canRedo();
+        ImGui.beginDisabled(!canRedo);
+        if (ImGui.button("Redo", 55.0f, 24.0f)) {
+            if (commandHistory != null) {
+                commandHistory.redo();
+            }
+        }
+        ImGui.endDisabled();
+
+        ImGui.sameLine();
+        ImGui.textDisabled("|");
+        ImGui.sameLine();
+
+        // Import URDF Button
+        ImGui.pushStyleColor(imgui.flag.ImGuiCol.Button, 0.15f, 0.55f, 0.45f, 1.0f);
+        ImGui.pushStyleColor(imgui.flag.ImGuiCol.ButtonHovered, 0.20f, 0.68f, 0.55f, 1.0f);
+        if (ImGui.button("Import URDF", 95.0f, 24.0f)) {
+            try (MemoryStack stack = stackPush()) {
+                PointerBuffer filters = stack.mallocPointer(1);
+                filters.put(stack.UTF8("*.urdf"));
+                filters.flip();
+
+                String path = TinyFileDialogs.tinyfd_openFileDialog("Select URDF Robot File", "", filters,
+                        "URDF Files (*.urdf)", false);
+                if (path != null && !path.trim().isEmpty()) {
+                    engine.loadUrdf(path);
+                }
+            }
+        }
+        ImGui.popStyleColor(2);
+        if (ImGui.isItemHovered()) {
+            ImGui.setTooltip(
+                    "Import URDF Robot (.urdf): Tek tıkla tüm linkleri, eklemleri, eksenleri ve limitleri otomatik kurar.");
         }
 
         ImGui.sameLine();
-        if (ImGui.button("Import Model Group", 150.0f, 24.0f)) {
-            isGroupImportPending = true;
+        ImGui.textDisabled("|");
+        ImGui.sameLine();
+
+        // Import Buttons with Tooltips
+        if (ImGui.button("Import Model", 95.0f, 24.0f)) {
+            importTypePending = 0;
             ImGui.openPopup("Import 3D Model");
         }
+        if (ImGui.isItemHovered()) {
+            ImGui.setTooltip("Import Model: 1 dosya = 1 link");
+        }
 
+        ImGui.sameLine();
+        if (ImGui.button("Import Group", 95.0f, 24.0f)) {
+            importTypePending = 1;
+            ImGui.openPopup("Import 3D Model");
+        }
+        if (ImGui.isItemHovered()) {
+            ImGui.setTooltip("Import Model Group: Multiple files = Multiple SEPARATE links (offsets preserved)");
+        }
+
+        ImGui.sameLine();
+        if (ImGui.button("Multi-Part Link", 105.0f, 24.0f)) {
+            importTypePending = 2;
+            ImGui.openPopup("Import 3D Model");
+        }
+        if (ImGui.isItemHovered()) {
+            ImGui.setTooltip(
+                    "Import Multi-Part Link: Çoklu dosya = TEK link (alt-parçalar birleşir, birlikte hareket eder)");
+        }
+
+        // Import Up-Axis Modal Popup
         if (ImGui.beginPopupModal("Import 3D Model", ImGuiWindowFlags.AlwaysAutoResize)) {
             ImGui.text("Select Model Coordinate System (Up Axis):");
             ImGui.spacing();
@@ -109,15 +188,45 @@ public class ToolbarPanel {
                 UpAxis upAxis = (selectedUpAxisIdx.get() == 1) ? UpAxis.Z_UP : UpAxis.Y_UP;
                 ImGui.closeCurrentPopup();
 
-                if (isGroupImportPending) {
-                    List<SceneNode> group = ModelImporter.importModelsGroup(rootNode, upAxis);
-                    if (!group.isEmpty() && selectionManager != null) {
-                        selectionManager.select(group.get(0));
+                if (importTypePending == 1) {
+                    List<SceneNode> group = ModelImporter.importModelsGroup(null, upAxis);
+                    if (!group.isEmpty()) {
+                        if (commandHistory != null) {
+                            commandHistory.executeAndRecord(new ImportModelCommand(group, rootNode, selectionManager));
+                        } else {
+                            for (SceneNode node : group) {
+                                rootNode.addChild(node);
+                            }
+                            if (selectionManager != null) {
+                                selectionManager.select(group.get(0));
+                            }
+                        }
+                    }
+                } else if (importTypePending == 2) {
+                    SceneNode multiLink = ModelImporter.importMultiMeshLink(null, upAxis);
+                    if (multiLink != null) {
+                        if (commandHistory != null) {
+                            commandHistory
+                                    .executeAndRecord(new ImportModelCommand(multiLink, rootNode, selectionManager));
+                        } else {
+                            rootNode.addChild(multiLink);
+                            if (selectionManager != null) {
+                                selectionManager.select(multiLink);
+                            }
+                        }
                     }
                 } else {
-                    SceneNode imported = ModelImporter.importModel(rootNode, upAxis);
-                    if (imported != null && selectionManager != null) {
-                        selectionManager.select(imported);
+                    SceneNode imported = ModelImporter.importModel(null, upAxis);
+                    if (imported != null) {
+                        if (commandHistory != null) {
+                            commandHistory
+                                    .executeAndRecord(new ImportModelCommand(imported, rootNode, selectionManager));
+                        } else {
+                            rootNode.addChild(imported);
+                            if (selectionManager != null) {
+                                selectionManager.select(imported);
+                            }
+                        }
                     }
                 }
             }
@@ -138,7 +247,7 @@ public class ToolbarPanel {
         boolean canDelete = selected != null && selected.getParent() != null;
 
         ImGui.beginDisabled(!canDelete);
-        if (ImGui.button("Delete Object", 110.0f, 24.0f)) {
+        if (ImGui.button("Delete", 65.0f, 24.0f)) {
             if (selected != null) {
                 engine.deleteNode(selected);
             }
@@ -163,7 +272,8 @@ public class ToolbarPanel {
             filters.flip();
 
             String defaultName = engine.getCurrentProjectPath() != null ? engine.getCurrentProjectPath() : "robot.json";
-            String path = TinyFileDialogs.tinyfd_saveFileDialog("Save Project As", defaultName, filters, "JSON Files (*.json)");
+            String path = TinyFileDialogs.tinyfd_saveFileDialog("Save Project As", defaultName, filters,
+                    "JSON Files (*.json)");
             if (path != null && !path.trim().isEmpty()) {
                 engine.saveProject(path);
             }
