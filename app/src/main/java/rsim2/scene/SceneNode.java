@@ -42,6 +42,41 @@ public class SceneNode {
         return getLocalTransform();
     }
 
+    public void reparentPreservingWorldTransform(SceneNode newParent) {
+        if (this.parent == newParent) {
+            return;
+        }
+
+        Matrix4f currentWorld = new Matrix4f(this.getWorldTransform());
+
+        if (this.parent != null) {
+            this.parent.removeChild(this);
+        }
+
+        if (newParent != null) {
+            newParent.addChild(this);
+            Matrix4f newParentWorldInverse = new Matrix4f(newParent.getWorldTransform()).invert();
+            Matrix4f newLocalTransform = newParentWorldInverse.mul(currentWorld, new Matrix4f());
+
+            newLocalTransform.getTranslation(this.localPosition);
+            newLocalTransform.getNormalizedRotation(this.localRotation);
+            newLocalTransform.getScale(this.localScale);
+        } else {
+            currentWorld.getTranslation(this.localPosition);
+            currentWorld.getNormalizedRotation(this.localRotation);
+            currentWorld.getScale(this.localScale);
+        }
+    }
+
+    public void setWorldPosition(Vector3f targetWorldPos) {
+        if (parent != null) {
+            Matrix4f parentWorldInv = new Matrix4f(parent.getWorldTransform()).invert();
+            parentWorldInv.transformPosition(targetWorldPos, this.localPosition);
+        } else {
+            this.localPosition.set(targetWorldPos);
+        }
+    }
+
     public void addChild(SceneNode child) {
         child.setParent(this);
         children.add(child);

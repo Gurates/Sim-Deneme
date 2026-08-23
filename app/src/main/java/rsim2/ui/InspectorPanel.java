@@ -8,7 +8,6 @@ import imgui.flag.ImGuiWindowFlags;
 import imgui.type.ImFloat;
 import imgui.type.ImInt;
 import org.joml.Matrix4f;
-import org.joml.Quaternionf;
 import org.joml.Vector3f;
 import rsim2.core.Engine;
 import rsim2.editor.AlignmentHelper;
@@ -312,6 +311,8 @@ public class InspectorPanel {
 
                 ImGui.spacing();
                 ImGui.text("Origin Position (Live Preview)");
+                ImGui.textDisabled("Konum otomatik korundu — parca gercek yerinde kaldi.\nGerekirse asagidan ince ayar yapabilirsiniz.");
+                ImGui.spacing();
 
                 ImGui.text("X"); ImGui.sameLine(25.0f); ImGui.setNextItemWidth(-1.0f);
                 boolean xChg = ImGui.inputFloat("##origX", originX, 0.05f, 0.5f, "%.2f");
@@ -407,7 +408,7 @@ public class InspectorPanel {
                 ImGui.separator();
                 ImGui.spacing();
 
-                String applyBtnText = (existingJoint != null) ? "Update Joint" : "Apply Joint (Connect)";
+                String applyBtnText = (existingJoint != null) ? "Update Joint" : "Apply Joint (Connect In Place)";
                 ImGui.pushStyleColor(ImGuiCol.Button, 0.2f, 0.65f, 0.3f, 1.0f);
                 ImGui.pushStyleColor(ImGuiCol.ButtonHovered, 0.25f, 0.75f, 0.35f, 1.0f);
                 if (ImGui.button(applyBtnText, -1.0f, 28.0f)) {
@@ -498,11 +499,11 @@ public class InspectorPanel {
     private void applyJoint(SceneNode parentNode, SceneNode childNode) {
         if (parentNode == null || childNode == null) return;
 
-        if (childNode.getParent() != null) {
-            childNode.getParent().removeChild(childNode);
-        }
-        parentNode.addChild(childNode);
-        childNode.getLocalPosition().set(originX.get(), originY.get(), originZ.get());
+        childNode.reparentPreservingWorldTransform(parentNode);
+
+        originX.set(childNode.getLocalPosition().x);
+        originY.set(childNode.getLocalPosition().y);
+        originZ.set(childNode.getLocalPosition().z);
 
         joints.removeIf(j -> j.getChildNode() == childNode);
 
@@ -523,7 +524,7 @@ public class InspectorPanel {
             engine.autoSaveProject();
         }
 
-        jointStatusMessage = "Joint applied: " + uniqueJointId;
+        jointStatusMessage = "Joint applied in place: " + uniqueJointId;
         jointErrorStatus = false;
     }
 
@@ -531,28 +532,9 @@ public class InspectorPanel {
         if (joint == null) return;
 
         SceneNode childNode = joint.getChildNode();
-        SceneNode parentNode = joint.getParentNode();
 
         if (childNode != null) {
-            Matrix4f worldTransform = childNode.getWorldTransform();
-            Vector3f worldPos = new Vector3f();
-            worldTransform.getTranslation(worldPos);
-
-            Quaternionf worldRot = new Quaternionf();
-            worldTransform.getNormalizedRotation(worldRot);
-
-            Vector3f worldScale = new Vector3f();
-            worldTransform.getScale(worldScale);
-
-            if (childNode.getParent() != null && childNode.getParent() == parentNode) {
-                childNode.getParent().removeChild(childNode);
-                if (rootNode != null) {
-                    rootNode.addChild(childNode);
-                }
-                childNode.getLocalPosition().set(worldPos);
-                childNode.getLocalRotation().set(worldRot);
-                childNode.getLocalScale().set(worldScale);
-            }
+            childNode.reparentPreservingWorldTransform(rootNode);
         }
 
         joints.remove(joint);
