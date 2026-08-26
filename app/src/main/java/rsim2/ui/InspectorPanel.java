@@ -6,15 +6,10 @@ import imgui.flag.ImGuiCond;
 import imgui.flag.ImGuiTreeNodeFlags;
 import imgui.flag.ImGuiWindowFlags;
 import imgui.type.ImFloat;
-import imgui.type.ImInt;
 import org.joml.Vector3f;
 import rsim2.core.Engine;
-import rsim2.editor.AlignmentHelper;
-import rsim2.editor.PointAlignTool;
 import rsim2.editor.SelectionManager;
 import rsim2.editor.commands.CommandHistory;
-import rsim2.editor.commands.DeleteJointCommand;
-import rsim2.editor.commands.ReparentCommand;
 import rsim2.scene.Joint;
 import rsim2.scene.JointType;
 import rsim2.scene.MotorController;
@@ -28,10 +23,8 @@ public class InspectorPanel {
     private SceneNode rootNode;
     private final SelectionManager selectionManager;
     private List<Joint> joints;
-    private PointAlignTool pointAlignTool;
     private CommandHistory commandHistory;
 
-    // Transform fields
     private final ImFloat valX = new ImFloat();
     private final ImFloat valY = new ImFloat();
     private final ImFloat valZ = new ImFloat();
@@ -40,24 +33,12 @@ public class InspectorPanel {
     private final ImFloat rotZ = new ImFloat();
     private final ImFloat valScale = new ImFloat();
 
-    // Joint Configuration State for selected node
-    private SceneNode lastSelectedNode = null;
-    private SceneNode pendingParentNode = null;
-    private final ImInt selectedTypeIdx = new ImInt(0); // 0 = Revolute, 1 = Fixed
-    private final Vector3f selectedAxis = new Vector3f(0.0f, 1.0f, 0.0f);
-    private final ImFloat originX = new ImFloat();
-    private final ImFloat originY = new ImFloat();
-    private final ImFloat originZ = new ImFloat();
-    private String jointStatusMessage = null;
-    private boolean jointErrorStatus = false;
-
     public InspectorPanel(Engine engine, SceneNode rootNode, SelectionManager selectionManager, List<Joint> joints,
-            PointAlignTool pointAlignTool, CommandHistory commandHistory) {
+            CommandHistory commandHistory) {
         this.engine = engine;
         this.rootNode = rootNode;
         this.selectionManager = selectionManager;
         this.joints = joints != null ? joints : new ArrayList<>();
-        this.pointAlignTool = pointAlignTool;
         this.commandHistory = commandHistory;
     }
 
@@ -67,10 +48,6 @@ public class InspectorPanel {
 
     public void setJoints(List<Joint> joints) {
         this.joints = joints != null ? joints : new ArrayList<>();
-    }
-
-    public void setPointAlignTool(PointAlignTool pointAlignTool) {
-        this.pointAlignTool = pointAlignTool;
     }
 
     public void setCommandHistory(CommandHistory commandHistory) {
@@ -99,38 +76,6 @@ public class InspectorPanel {
             return;
         }
 
-        // Detect node selection change to synchronize joint config state
-        if (targetNode != lastSelectedNode) {
-            lastSelectedNode = targetNode;
-            jointStatusMessage = null;
-            jointErrorStatus = false;
-            if (pointAlignTool != null) {
-                pointAlignTool.clearPoints();
-            }
-
-            Joint existingJoint = findJointForChild(targetNode);
-            if (existingJoint != null) {
-                pendingParentNode = existingJoint.getParentNode();
-                selectedTypeIdx.set(existingJoint.getType() == JointType.REVOLUTE ? 0 : 1);
-                selectedAxis.set(existingJoint.getAxis());
-            } else if (targetNode.getParent() != null && !targetNode.getParent().getId().equalsIgnoreCase("world")) {
-                pendingParentNode = targetNode.getParent();
-                selectedTypeIdx.set(0);
-                selectedAxis.set(0.0f, 1.0f, 0.0f);
-            } else {
-                pendingParentNode = null;
-                selectedTypeIdx.set(0);
-                selectedAxis.set(0.0f, 1.0f, 0.0f);
-            }
-
-            originX.set(targetNode.getLocalPosition().x);
-            originY.set(targetNode.getLocalPosition().y);
-            originZ.set(targetNode.getLocalPosition().z);
-        }
-
-        // ==========================================
-        // 1. POSITION SECTION
-        // ==========================================
         Vector3f pos = targetNode.getLocalPosition();
         valX.set(pos.x);
         valY.set(pos.y);
@@ -142,42 +87,33 @@ public class InspectorPanel {
             ImGui.text("X");
             ImGui.sameLine(30.0f);
             ImGui.setNextItemWidth(-1.0f);
-            if (ImGui.inputFloat("##posX", valX, 0.1f, 1.0f, "%.2f"))
+            if (ImGui.inputFloat("##posX", valX, 0.1f, 1.0f, "%.3f"))
                 posChanged = true;
 
             ImGui.text("Y");
             ImGui.sameLine(30.0f);
             ImGui.setNextItemWidth(-1.0f);
-            if (ImGui.inputFloat("##posY", valY, 0.1f, 1.0f, "%.2f"))
+            if (ImGui.inputFloat("##posY", valY, 0.1f, 1.0f, "%.3f"))
                 posChanged = true;
 
             ImGui.text("Z");
             ImGui.sameLine(30.0f);
             ImGui.setNextItemWidth(-1.0f);
-            if (ImGui.inputFloat("##posZ", valZ, 0.1f, 1.0f, "%.2f"))
+            if (ImGui.inputFloat("##posZ", valZ, 0.1f, 1.0f, "%.3f"))
                 posChanged = true;
 
             if (posChanged) {
                 targetNode.getLocalPosition().set(valX.get(), valY.get(), valZ.get());
-                originX.set(valX.get());
-                originY.set(valY.get());
-                originZ.set(valZ.get());
             }
 
             ImGui.spacing();
             if (ImGui.button("Reset Position", -1.0f, 26.0f)) {
-                targetNode.getLocalPosition().set(0.0f, 0.5f, 0.0f);
-                originX.set(0.0f);
-                originY.set(0.5f);
-                originZ.set(0.0f);
+                targetNode.getLocalPosition().set(0.0f, 0.0f, 0.0f);
             }
         }
 
         ImGui.spacing();
 
-        // ==========================================
-        // 2. ROTATION SECTION
-        // ==========================================
         Vector3f euler = new Vector3f();
         targetNode.getLocalRotation().getEulerAnglesXYZ(euler);
         rotX.set((float) Math.toDegrees(euler.x));
@@ -233,9 +169,6 @@ public class InspectorPanel {
 
         ImGui.spacing();
 
-        // ==========================================
-        // 3. SCALE SECTION
-        // ==========================================
         Vector3f scale = targetNode.getLocalScale();
         valScale.set(scale.x);
 
@@ -256,294 +189,53 @@ public class InspectorPanel {
 
         ImGui.spacing();
 
-        // ==========================================
-        // 4. JOINT / CONNECTED BODY SECTION
-        // ==========================================
         Joint existingJoint = findJointForChild(targetNode);
 
-        if (ImGui.collapsingHeader("Joint / Connected Body", ImGuiTreeNodeFlags.DefaultOpen)) {
-            ImGui.text("Connected Body (Parent):");
+        if (existingJoint != null) {
+            if (ImGui.collapsingHeader("Joint: " + existingJoint.getId(), ImGuiTreeNodeFlags.DefaultOpen)) {
+                ImGui.text("Parent:");
+                ImGui.sameLine(70.0f);
+                ImGui.textColored(0.3f, 0.8f, 1.0f, 1.0f,
+                        existingJoint.getParentNode() != null ? existingJoint.getParentNode().getId() : "None");
 
-            String parentLabel = (pendingParentNode != null)
-                    ? pendingParentNode.getId()
-                    : "None (Drag a node from Hierarchy)";
+                ImGui.text("Type:");
+                ImGui.sameLine(70.0f);
+                ImGui.text(existingJoint.getType().name());
 
-            if (pendingParentNode == null) {
-                ImGui.pushStyleColor(ImGuiCol.Text, 0.6f, 0.6f, 0.6f, 1.0f);
-            }
-            ImGui.button(parentLabel + "##connBodyBtn", -1.0f, 26.0f);
-            if (pendingParentNode == null) {
-                ImGui.popStyleColor();
-            }
+                Vector3f axis = existingJoint.getAxis();
+                ImGui.text("Axis:");
+                ImGui.sameLine(70.0f);
+                ImGui.text(String.format("(%.1f, %.1f, %.1f)", axis.x, axis.y, axis.z));
 
-            // Drag & Drop Target
-            if (ImGui.beginDragDropTarget()) {
-                Object payload = ImGui.acceptDragDropPayload("SCENE_NODE");
-                if (payload != null) {
-                    SceneNode dropped = HierarchyPanel.draggedNode;
-                    if (dropped == null && payload instanceof String) {
-                        dropped = findNodeById(rootNode, (String) payload);
-                    }
-                    if (dropped != null) {
-                        if (dropped == targetNode) {
-                            jointStatusMessage = "Cannot connect a node to itself!";
-                            jointErrorStatus = true;
-                        } else if (isAncestor(targetNode, dropped)) {
-                            jointStatusMessage = "Invalid parent: would create a cycle in tree!";
-                            jointErrorStatus = true;
-                        } else {
-                            pendingParentNode = dropped;
-                            jointStatusMessage = null;
-                            jointErrorStatus = false;
-                            originX.set(targetNode.getLocalPosition().x);
-                            originY.set(targetNode.getLocalPosition().y);
-                            originZ.set(targetNode.getLocalPosition().z);
-                        }
-                    }
-                }
-                ImGui.endDragDropTarget();
-            }
-
-            if (pendingParentNode != null) {
-                ImGui.spacing();
-
-                // Joint Type selection
-                ImGui.text("Joint Type");
-                boolean isRev = (selectedTypeIdx.get() == 0);
-                if (isRev)
-                    ImGui.pushStyleColor(ImGuiCol.Button, 0.2f, 0.6f, 0.9f, 1.0f);
-                if (ImGui.button("Revolute", 130.0f, 24.0f)) {
-                    selectedTypeIdx.set(0);
-                }
-                if (isRev)
-                    ImGui.popStyleColor();
-
-                ImGui.sameLine();
-                boolean isFixed = (selectedTypeIdx.get() == 1);
-                if (isFixed)
-                    ImGui.pushStyleColor(ImGuiCol.Button, 0.2f, 0.6f, 0.9f, 1.0f);
-                if (ImGui.button("Fixed", 130.0f, 24.0f)) {
-                    selectedTypeIdx.set(1);
-                }
-                if (isFixed)
-                    ImGui.popStyleColor();
-
-                // Rotation Axis if Revolute
-                if (selectedTypeIdx.get() == 0) {
-                    ImGui.spacing();
-                    ImGui.text("Rotation Axis");
-
-                    boolean isX = selectedAxis.x == 1.0f;
-                    if (isX)
-                        ImGui.pushStyleColor(ImGuiCol.Button, 0.2f, 0.6f, 0.9f, 1.0f);
-                    if (ImGui.button("X##axisX", 85.0f, 24.0f)) {
-                        selectedAxis.set(1.0f, 0.0f, 0.0f);
-                    }
-                    if (isX)
-                        ImGui.popStyleColor();
-
-                    ImGui.sameLine();
-                    boolean isY = selectedAxis.y == 1.0f;
-                    if (isY)
-                        ImGui.pushStyleColor(ImGuiCol.Button, 0.2f, 0.6f, 0.9f, 1.0f);
-                    if (ImGui.button("Y##axisY", 85.0f, 24.0f)) {
-                        selectedAxis.set(0.0f, 1.0f, 0.0f);
-                    }
-                    if (isY)
-                        ImGui.popStyleColor();
-
-                    ImGui.sameLine();
-                    boolean isZ = selectedAxis.z == 1.0f;
-                    if (isZ)
-                        ImGui.pushStyleColor(ImGuiCol.Button, 0.2f, 0.6f, 0.9f, 1.0f);
-                    if (ImGui.button("Z##axisZ", 85.0f, 24.0f)) {
-                        selectedAxis.set(0.0f, 0.0f, 1.0f);
-                    }
-                    if (isZ)
-                        ImGui.popStyleColor();
-                }
-
-                // Origin Position (Live Preview)
-                ImGui.spacing();
-                ImGui.text("Origin Position (Live Preview)");
-                ImGui.textDisabled(
-                        "Konum otomatik korundu — parca gercek yerinde kaldi.\nGerekirse asagidan ince ayar yapabilirsiniz.");
-                ImGui.spacing();
-
-                ImGui.text("X");
-                ImGui.sameLine(25.0f);
-                ImGui.setNextItemWidth(-1.0f);
-                boolean xChg = ImGui.inputFloat("##origX", originX, 0.05f, 0.5f, "%.2f");
-
-                ImGui.text("Y");
-                ImGui.sameLine(25.0f);
-                ImGui.setNextItemWidth(-1.0f);
-                boolean yChg = ImGui.inputFloat("##origY", originY, 0.05f, 0.5f, "%.2f");
-
-                ImGui.text("Z");
-                ImGui.sameLine(25.0f);
-                ImGui.setNextItemWidth(-1.0f);
-                boolean zChg = ImGui.inputFloat("##origZ", originZ, 0.05f, 0.5f, "%.2f");
-
-                if (xChg || yChg || zChg) {
-                    targetNode.getLocalPosition().set(originX.get(), originY.get(), originZ.get());
-                } else if (!ImGui.isAnyItemActive()) {
-                    originX.set(targetNode.getLocalPosition().x);
-                    originY.set(targetNode.getLocalPosition().y);
-                    originZ.set(targetNode.getLocalPosition().z);
-                }
-
-                ImGui.spacing();
-
-                // Snap Buttons (Optional Corrections)
-                if (ImGui.button("Snap to Top", 130.0f, 24.0f)) {
-                    AlignmentHelper.snapToTop(pendingParentNode, targetNode);
-                    originY.set(targetNode.getLocalPosition().y);
-                }
-                ImGui.sameLine();
-                if (ImGui.button("Center X/Z", 130.0f, 24.0f)) {
-                    AlignmentHelper.snapCenterXZ(pendingParentNode, targetNode);
-                    originX.set(targetNode.getLocalPosition().x);
-                    originZ.set(targetNode.getLocalPosition().z);
-                }
-
-                if (ImGui.button("Reset to Origin (0,0,0)", -1.0f, 22.0f)) {
-                    targetNode.getLocalPosition().set(0.0f, 0.0f, 0.0f);
-                    originX.set(0.0f);
-                    originY.set(0.0f);
-                    originZ.set(0.0f);
-                }
-
-                // Point Align Section
-                if (pointAlignTool != null) {
-                    pointAlignTool.setNodes(pendingParentNode, targetNode);
-
+                if (existingJoint.getType() == JointType.REVOLUTE && existingJoint.getMotor() != null) {
                     ImGui.spacing();
                     ImGui.separator();
                     ImGui.spacing();
+                    ImGui.text("Motor Control");
 
-                    ImGui.text("Point Align (Pick Surface Points)");
+                    MotorController motor = existingJoint.getMotor();
+                    float minDeg = (float) Math.toDegrees(motor.getMinLimitRadians());
+                    float maxDeg = (float) Math.toDegrees(motor.getMaxLimitRadians());
 
-                    boolean pickP = pointAlignTool.isPickingParent();
-                    if (pickP)
-                        ImGui.pushStyleColor(ImGuiCol.Button, 0.9f, 0.5f, 0.1f, 1.0f);
-                    String pBtnText = pickP ? "[Click Parent in 3D]" : "Pick Pt on Parent";
-                    if (ImGui.button(pBtnText, 130.0f, 24.0f)) {
-                        if (pickP)
-                            pointAlignTool.cancelPicking();
-                        else
-                            pointAlignTool.startPickParentPoint();
-                    }
-                    if (pickP)
-                        ImGui.popStyleColor();
-
-                    ImGui.sameLine();
-                    boolean pickC = pointAlignTool.isPickingChild();
-                    if (pickC)
-                        ImGui.pushStyleColor(ImGuiCol.Button, 0.75f, 0.25f, 0.85f, 1.0f);
-                    String cBtnText = pickC ? "[Click Child in 3D]" : "Pick Pt on Child";
-                    if (ImGui.button(cBtnText, 130.0f, 24.0f)) {
-                        if (pickC)
-                            pointAlignTool.cancelPicking();
-                        else
-                            pointAlignTool.startPickChildPoint();
-                    }
-                    if (pickC)
-                        ImGui.popStyleColor();
-
-                    if (pointAlignTool.getPickedParentPointWorld() != null) {
-                        Vector3f pt = pointAlignTool.getPickedParentPointWorld();
-                        ImGui.textColored(1.0f, 0.6f, 0.1f, 1.0f,
-                                String.format("Parent: (%.2f, %.2f, %.2f)", pt.x, pt.y, pt.z));
-                    }
-                    if (pointAlignTool.getPickedChildPointWorld() != null) {
-                        Vector3f pt = pointAlignTool.getPickedChildPointWorld();
-                        ImGui.textColored(0.85f, 0.35f, 0.95f, 1.0f,
-                                String.format("Child:  (%.2f, %.2f, %.2f)", pt.x, pt.y, pt.z));
+                    float[] angleArr = new float[] { motor.getTargetAngleRadians() };
+                    ImGui.text("Target Angle");
+                    ImGui.setNextItemWidth(-1.0f);
+                    if (ImGui.sliderAngle("##targetAngle", angleArr, minDeg, maxDeg)) {
+                        motor.setTargetAngleRadians(angleArr[0]);
                     }
 
-                    boolean canAlign = pointAlignTool.canAlign();
-                    ImGui.beginDisabled(!canAlign);
-                    if (ImGui.button("Align Points", 130.0f, 24.0f)) {
-                        pointAlignTool.align();
-                        originX.set(targetNode.getLocalPosition().x);
-                        originY.set(targetNode.getLocalPosition().y);
-                        originZ.set(targetNode.getLocalPosition().z);
-                    }
-                    ImGui.endDisabled();
+                    float currentDeg = (float) Math.toDegrees(existingJoint.getCurrentAngleRadians());
+                    float targetDeg = (float) Math.toDegrees(motor.getTargetAngleRadians());
 
-                    ImGui.sameLine();
-                    if (ImGui.button("Clear Points", 130.0f, 24.0f)) {
-                        pointAlignTool.clearPoints();
-                    }
-                }
-
-                ImGui.spacing();
-                ImGui.separator();
-                ImGui.spacing();
-
-                // Apply / Create / Remove Joint Buttons
-                String applyBtnText = (existingJoint != null) ? "Update Joint" : "Apply Joint (Connect In Place)";
-                ImGui.pushStyleColor(ImGuiCol.Button, 0.2f, 0.65f, 0.3f, 1.0f);
-                ImGui.pushStyleColor(ImGuiCol.ButtonHovered, 0.25f, 0.75f, 0.35f, 1.0f);
-                if (ImGui.button(applyBtnText, -1.0f, 28.0f)) {
-                    applyJoint(pendingParentNode, targetNode);
-                }
-                ImGui.popStyleColor(2);
-
-                if (existingJoint != null) {
                     ImGui.spacing();
-                    ImGui.pushStyleColor(ImGuiCol.Button, 0.7f, 0.25f, 0.25f, 1.0f);
-                    if (ImGui.button("Remove Joint (Disconnect)", -1.0f, 24.0f)) {
-                        removeJoint(existingJoint);
+                    ImGui.text(String.format("Current: %.1f° | Target: %.1f°", currentDeg, targetDeg));
+                    ImGui.textDisabled(String.format("Speed: %.1f rad/s | Limits: [%.0f°, %.0f°]",
+                            motor.getMaxSpeedRadiansPerSecond(), minDeg, maxDeg));
+
+                    ImGui.spacing();
+                    if (ImGui.button("Reset Angle (0°)", -1.0f, 26.0f)) {
+                        motor.setTargetAngleRadians(0.0f);
                     }
-                    ImGui.popStyleColor();
-                }
-            } else {
-                ImGui.spacing();
-                ImGui.textDisabled("Drag any body from Hierarchy into the box above to create a joint.");
-            }
-
-            if (jointStatusMessage != null) {
-                ImGui.spacing();
-                if (jointErrorStatus) {
-                    ImGui.textColored(1.0f, 0.3f, 0.3f, 1.0f, jointStatusMessage);
-                } else {
-                    ImGui.textColored(0.3f, 0.9f, 0.3f, 1.0f, jointStatusMessage);
-                }
-            }
-        }
-
-        // ==========================================
-        // 5. MOTOR CONTROL SECTION (REVOLUTE JOINTS)
-        // ==========================================
-        if (existingJoint != null && existingJoint.getType() == JointType.REVOLUTE
-                && existingJoint.getMotor() != null) {
-            ImGui.spacing();
-            if (ImGui.collapsingHeader("Motor Control (" + existingJoint.getId() + ")",
-                    ImGuiTreeNodeFlags.DefaultOpen)) {
-                MotorController motor = existingJoint.getMotor();
-                float minDeg = (float) Math.toDegrees(motor.getMinLimitRadians());
-                float maxDeg = (float) Math.toDegrees(motor.getMaxLimitRadians());
-
-                float[] angleArr = new float[] { motor.getTargetAngleRadians() };
-                ImGui.text("Target Angle");
-                ImGui.setNextItemWidth(-1.0f);
-                if (ImGui.sliderAngle("##targetAngle", angleArr, minDeg, maxDeg)) {
-                    motor.setTargetAngleRadians(angleArr[0]);
-                }
-
-                float currentDeg = (float) Math.toDegrees(existingJoint.getCurrentAngleRadians());
-                float targetDeg = (float) Math.toDegrees(motor.getTargetAngleRadians());
-
-                ImGui.spacing();
-                ImGui.text(String.format("Current Angle: %.1f°", currentDeg));
-                ImGui.textDisabled(String.format("Target: %.1f° | Max Speed: %.1f rad/s", targetDeg,
-                        motor.getMaxSpeedRadiansPerSecond()));
-
-                ImGui.spacing();
-                if (ImGui.button("Reset Angle", -1.0f, 26.0f)) {
-                    motor.setTargetAngleRadians(0.0f);
                 }
             }
         }
@@ -552,7 +244,6 @@ public class InspectorPanel {
         ImGui.separator();
         ImGui.spacing();
 
-        // Delete Object
         if (targetNode.getParent() != null) {
             ImGui.pushStyleColor(ImGuiCol.Button, 0.85f, 0.25f, 0.25f, 1.0f);
             ImGui.pushStyleColor(ImGuiCol.ButtonHovered, 0.95f, 0.35f, 0.35f, 1.0f);
@@ -578,63 +269,6 @@ public class InspectorPanel {
         ImGui.end();
     }
 
-    private void applyJoint(SceneNode parentNode, SceneNode childNode) {
-        if (parentNode == null || childNode == null)
-            return;
-
-        String baseJointId = parentNode.getId() + "_" + childNode.getId() + "_joint";
-        String uniqueJointId = baseJointId;
-        int counter = 1;
-        while (jointExists(uniqueJointId, joints)) {
-            uniqueJointId = baseJointId + "_" + counter++;
-        }
-
-        JointType type = (selectedTypeIdx.get() == 0) ? JointType.REVOLUTE : JointType.FIXED;
-        Vector3f axis = (type == JointType.REVOLUTE) ? new Vector3f(selectedAxis) : new Vector3f(0.0f, 0.0f, 0.0f);
-
-        Joint newJoint = new Joint(uniqueJointId, parentNode, childNode, type, axis);
-
-        if (commandHistory != null) {
-            commandHistory.executeAndRecord(new ReparentCommand(childNode, parentNode, newJoint, joints));
-        } else {
-            childNode.reparentPreservingWorldTransform(parentNode);
-            joints.removeIf(j -> j.getChildNode() == childNode);
-            joints.add(newJoint);
-            if (engine != null) {
-                engine.autoSaveProject();
-            }
-        }
-
-        originX.set(childNode.getLocalPosition().x);
-        originY.set(childNode.getLocalPosition().y);
-        originZ.set(childNode.getLocalPosition().z);
-
-        jointStatusMessage = "Joint applied in place: " + uniqueJointId;
-        jointErrorStatus = false;
-    }
-
-    private void removeJoint(Joint joint) {
-        if (joint == null)
-            return;
-
-        if (commandHistory != null) {
-            commandHistory.executeAndRecord(new DeleteJointCommand(joint, joints, rootNode));
-        } else {
-            SceneNode childNode = joint.getChildNode();
-            if (childNode != null) {
-                childNode.reparentPreservingWorldTransform(rootNode);
-            }
-            joints.remove(joint);
-            if (engine != null) {
-                engine.autoSaveProject();
-            }
-        }
-
-        pendingParentNode = null;
-        jointStatusMessage = "Joint removed.";
-        jointErrorStatus = false;
-    }
-
     private Joint findJointForChild(SceneNode childNode) {
         if (joints == null || childNode == null)
             return null;
@@ -642,42 +276,6 @@ public class InspectorPanel {
             if (j.getChildNode() == childNode) {
                 return j;
             }
-        }
-        return null;
-    }
-
-    private boolean jointExists(String id, List<Joint> jointList) {
-        if (jointList == null)
-            return false;
-        for (Joint j : jointList) {
-            if (j.getId().equals(id))
-                return true;
-        }
-        return false;
-    }
-
-    private boolean isAncestor(SceneNode potentialAncestor, SceneNode node) {
-        if (potentialAncestor == null || node == null)
-            return false;
-        SceneNode current = node.getParent();
-        while (current != null) {
-            if (current == potentialAncestor) {
-                return true;
-            }
-            current = current.getParent();
-        }
-        return false;
-    }
-
-    private SceneNode findNodeById(SceneNode root, String id) {
-        if (root == null || id == null)
-            return null;
-        if (root.getId().equals(id))
-            return root;
-        for (SceneNode child : root.getChildren()) {
-            SceneNode found = findNodeById(child, id);
-            if (found != null)
-                return found;
         }
         return null;
     }

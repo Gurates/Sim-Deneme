@@ -25,8 +25,8 @@ public class ToolbarPanel {
     private final SelectionManager selectionManager;
     private CommandHistory commandHistory;
 
-    private final ImInt selectedUpAxisIdx = new ImInt(0); // 0 = Y-up, 1 = Z-up
-    private int importTypePending = 0; // 0 = Single, 1 = Group, 2 = Multi-Part Link
+    private final ImInt selectedUpAxisIdx = new ImInt(0);
+    private int importTypePending = 0;
 
     public ToolbarPanel(Engine engine, SceneNode rootNode, SelectionManager selectionManager,
             CommandHistory commandHistory) {
@@ -58,7 +58,6 @@ public class ToolbarPanel {
 
         ImGui.begin("Toolbar", flags);
 
-        // Project File Operations
         if (ImGui.button("Load Project", 95.0f, 24.0f)) {
             try (MemoryStack stack = stackPush()) {
                 PointerBuffer filters = stack.mallocPointer(1);
@@ -92,41 +91,17 @@ public class ToolbarPanel {
         ImGui.textDisabled("|");
         ImGui.sameLine();
 
-        // Undo / Redo Buttons
-        boolean canUndo = commandHistory != null && commandHistory.canUndo();
-        ImGui.beginDisabled(!canUndo);
-        if (ImGui.button("Undo", 55.0f, 24.0f)) {
-            if (commandHistory != null) {
-                commandHistory.undo();
-            }
-        }
-        ImGui.endDisabled();
-
-        ImGui.sameLine();
-        boolean canRedo = commandHistory != null && commandHistory.canRedo();
-        ImGui.beginDisabled(!canRedo);
-        if (ImGui.button("Redo", 55.0f, 24.0f)) {
-            if (commandHistory != null) {
-                commandHistory.redo();
-            }
-        }
-        ImGui.endDisabled();
-
-        ImGui.sameLine();
-        ImGui.textDisabled("|");
-        ImGui.sameLine();
-
-        // Import URDF Button
         ImGui.pushStyleColor(imgui.flag.ImGuiCol.Button, 0.15f, 0.55f, 0.45f, 1.0f);
         ImGui.pushStyleColor(imgui.flag.ImGuiCol.ButtonHovered, 0.20f, 0.68f, 0.55f, 1.0f);
         if (ImGui.button("Import URDF", 95.0f, 24.0f)) {
             try (MemoryStack stack = stackPush()) {
-                PointerBuffer filters = stack.mallocPointer(1);
+                PointerBuffer filters = stack.mallocPointer(2);
                 filters.put(stack.UTF8("*.urdf"));
+                filters.put(stack.UTF8("*.xml"));
                 filters.flip();
 
-                String path = TinyFileDialogs.tinyfd_openFileDialog("Select URDF Robot File", "", filters,
-                        "URDF Files (*.urdf)", false);
+                String path = TinyFileDialogs.tinyfd_openFileDialog("Select URDF / XML Robot File", "", filters,
+                        "URDF / XML Robot Files (*.urdf, *.xml)", false);
                 if (path != null && !path.trim().isEmpty()) {
                     engine.loadUrdf(path);
                 }
@@ -135,14 +110,13 @@ public class ToolbarPanel {
         ImGui.popStyleColor(2);
         if (ImGui.isItemHovered()) {
             ImGui.setTooltip(
-                    "Import URDF Robot (.urdf): Tek tıkla tüm linkleri, eklemleri, eksenleri ve limitleri otomatik kurar.");
+                    "Import URDF/XML Robot: Tek tıkla tüm linkleri, eklemleri, eksenleri ve limitleri otomatik kurar.");
         }
 
         ImGui.sameLine();
         ImGui.textDisabled("|");
         ImGui.sameLine();
 
-        // Import Buttons with Tooltips
         if (ImGui.button("Import Model", 95.0f, 24.0f)) {
             importTypePending = 0;
             ImGui.openPopup("Import 3D Model");
@@ -167,10 +141,9 @@ public class ToolbarPanel {
         }
         if (ImGui.isItemHovered()) {
             ImGui.setTooltip(
-                    "Import Multi-Part Link: Çoklu dosya = TEK link (alt-parçalar birleşir, birlikte hareket eder)");
+                    "Import Multi-Part Link");
         }
 
-        // Import Up-Axis Modal Popup
         if (ImGui.beginPopupModal("Import 3D Model", ImGuiWindowFlags.AlwaysAutoResize)) {
             ImGui.text("Select Model Coordinate System (Up Axis):");
             ImGui.spacing();

@@ -9,7 +9,6 @@ import org.lwjgl.system.MemoryStack;
 import rsim2.camera.Camera;
 import rsim2.data.RobotDefinitionDTO;
 import rsim2.editor.Picker;
-import rsim2.editor.PointAlignTool;
 import rsim2.editor.SelectionManager;
 import rsim2.editor.TranslateGizmo;
 import rsim2.editor.commands.CommandHistory;
@@ -45,7 +44,6 @@ public class Engine {
     private Renderer renderer;
     private Camera camera;
     private TranslateGizmo translateGizmo;
-    private PointAlignTool pointAlignTool;
     private CommandHistory commandHistory;
 
     private ImGuiLayer imguiLayer;
@@ -58,6 +56,7 @@ public class Engine {
     private SceneNode rootNode;
     private List<Joint> joints = new ArrayList<>();
     private String currentProjectPath = null;
+
     private long lastAutoSaveTime = 0;
     private String lastAutoSaveMessage = "";
 
@@ -68,15 +67,11 @@ public class Engine {
         init();
         loop();
 
-        if (imguiLayer != null) {
-            imguiLayer.dispose();
+        if (commandHistory != null) {
+            commandHistory.clear();
         }
 
-        glfwFreeCallbacks(window);
-        glfwDestroyWindow(window);
-
-        glfwTerminate();
-        glfwSetErrorCallback(null).free();
+        cleanup();
     }
 
     private void init() {
@@ -103,9 +98,6 @@ public class Engine {
         input.init(window);
 
         glfwSetKeyCallback(window, (win, key, scancode, action, mods) -> {
-            if (key == GLFW_KEY_ESCAPE && action == GLFW_RELEASE) {
-                glfwSetWindowShouldClose(win, true);
-            }
             input.invokeKey(key, action);
         });
 
@@ -126,21 +118,19 @@ public class Engine {
             GLFWVidMode vidmode = glfwGetVideoMode(glfwGetPrimaryMonitor());
 
             if (vidmode != null) {
-                try {
-                    glfwSetWindowPos(
-                            window,
-                            (vidmode.width() - pWidth.get(0)) / 2,
-                            (vidmode.height() - pHeight.get(0)) / 2);
-                } catch (Throwable ignored) {
-                }
+                glfwSetWindowPos(
+                        window,
+                        (vidmode.width() - pWidth.get(0)) / 2,
+                        (vidmode.height() - pHeight.get(0)) / 2);
             }
         }
 
         glfwMakeContextCurrent(window);
-        glfwSwapInterval(0); // vsync off 1= on
+        glfwSwapInterval(0);
         glfwShowWindow(window);
 
         GL.createCapabilities();
+        glClearColor(0.12f, 0.12f, 0.14f, 1.0f);
 
         glEnable(GL_DEPTH_TEST);
         glEnable(GL_BLEND);
@@ -152,7 +142,6 @@ public class Engine {
         camera = new Camera((float) width / height);
         renderer = new Renderer();
         translateGizmo = new TranslateGizmo();
-        pointAlignTool = new PointAlignTool();
         commandHistory = new CommandHistory(this::autoSaveProject);
         translateGizmo.setCommandHistory(commandHistory);
 
@@ -176,7 +165,7 @@ public class Engine {
         toolbarPanel = new ToolbarPanel(this, rootNode, selectionManager, commandHistory);
         hierarchyPanel = new HierarchyPanel(rootNode, selectionManager);
         allJointsPanel = new AllJointsPanel(this, rootNode, joints, commandHistory);
-        inspectorPanel = new InspectorPanel(this, rootNode, selectionManager, joints, pointAlignTool, commandHistory);
+        inspectorPanel = new InspectorPanel(this, rootNode, selectionManager, joints, commandHistory);
     }
 
     public void loadProject(String filePath) {
@@ -197,9 +186,6 @@ public class Engine {
             this.joints = res.joints != null ? res.joints : new ArrayList<>();
             this.currentProjectPath = filePath;
 
-            if (pointAlignTool != null) {
-                pointAlignTool.clearPoints();
-            }
             if (commandHistory != null) {
                 commandHistory.clear();
             }
@@ -222,7 +208,6 @@ public class Engine {
             if (inspectorPanel != null) {
                 inspectorPanel.setRootNode(this.rootNode);
                 inspectorPanel.setJoints(this.joints);
-                inspectorPanel.setPointAlignTool(this.pointAlignTool);
                 inspectorPanel.setCommandHistory(this.commandHistory);
             }
         } catch (Exception e) {
@@ -232,30 +217,31 @@ public class Engine {
 
     public void loadUrdf(String filePath) {
         try {
-            System.out.println("Loading URDF robot from: " + filePath);
+            System.out.println("Loading URDF/XML robot from: " + filePath);
             UrdfLoader.UrdfResult res = UrdfLoader.load(filePath, true);
 
             if (this.rootNode != null) {
                 this.rootNode.cleanup();
             }
 
-            this.rootNode = res.rootNode != null ? res.rootNode : new SceneNode("world");
+            this.rootNode = new SceneNode("world");
+            if (res.rootNode != null) {
+                this.rootNode.addChild(res.rootNode);
+            }
             this.joints = res.joints != null ? res.joints : new ArrayList<>();
 
             File urdfFile = new File(filePath);
-            File autoSaveJson = new File(urdfFile.getParentFile(), "robot.json");
-            this.currentProjectPath = autoSaveJson.getAbsolutePath();
+            String jsonPath = new File(urdfFile.getParentFile(), "robot.json").getAbsolutePath();
+            this.currentProjectPath = jsonPath;
 
-            if (pointAlignTool != null) {
-                pointAlignTool.clearPoints();
-            }
             if (commandHistory != null) {
                 commandHistory.clear();
             }
+
             if (selectionManager != null) {
                 selectionManager.clearSelection();
-                if (this.rootNode != null) {
-                    selectionManager.select(this.rootNode);
+                if (res.rootNode != null) {
+                    selectionManager.select(res.rootNode);
                 }
             }
             if (hierarchyPanel != null) {
@@ -273,11 +259,11 @@ public class Engine {
             if (inspectorPanel != null) {
                 inspectorPanel.setRootNode(this.rootNode);
                 inspectorPanel.setJoints(this.joints);
-                inspectorPanel.setPointAlignTool(this.pointAlignTool);
                 inspectorPanel.setCommandHistory(this.commandHistory);
             }
 
-            autoSaveProject();
+            saveProject(jsonPath);
+            System.out.println("Robot imported successfully and auto-saved to: " + jsonPath);
         } catch (Exception e) {
             e.printStackTrace();
         }
@@ -289,11 +275,11 @@ public class Engine {
             File jsonFile = new File(filePath);
             String jsonDir = jsonFile.getParentFile() != null ? jsonFile.getParentFile().getAbsolutePath() : "";
 
-            RobotDefinitionDTO dto = RobotJsonIO.fromSceneGraph(rootNode, joints, "RSimRobot", jsonDir);
+            RobotDefinitionDTO dto = RobotJsonIO.fromSceneGraph(rootNode, joints, jsonDir);
             RobotJsonIO.save(dto, filePath);
             this.currentProjectPath = filePath;
             this.lastAutoSaveTime = System.currentTimeMillis();
-            this.lastAutoSaveMessage = "Kaydedildi";
+            this.lastAutoSaveMessage = "Saved: " + new File(filePath).getName();
         } catch (Exception e) {
             e.printStackTrace();
         }
@@ -301,19 +287,20 @@ public class Engine {
 
     public void autoSaveProject() {
         if (currentProjectPath != null && !currentProjectPath.trim().isEmpty()) {
-            try {
-                System.out.println("Auto-saving project to: " + currentProjectPath);
-                File jsonFile = new File(currentProjectPath);
-                String jsonDir = jsonFile.getParentFile() != null ? jsonFile.getParentFile().getAbsolutePath() : "";
-
-                RobotDefinitionDTO dto = RobotJsonIO.fromSceneGraph(rootNode, joints, "RSimRobot", jsonDir);
-                RobotJsonIO.save(dto, currentProjectPath);
-                this.lastAutoSaveTime = System.currentTimeMillis();
-                this.lastAutoSaveMessage = "Otomatik kaydedildi";
-            } catch (Exception e) {
-                e.printStackTrace();
-            }
+            saveProject(currentProjectPath);
         }
+    }
+
+    public String getCurrentProjectPath() {
+        return currentProjectPath;
+    }
+
+    public long getLastAutoSaveTime() {
+        return lastAutoSaveTime;
+    }
+
+    public String getLastAutoSaveMessage() {
+        return lastAutoSaveMessage;
     }
 
     public void deleteNode(SceneNode node) {
@@ -336,8 +323,13 @@ public class Engine {
                 selectionManager.clearSelection();
             }
 
-            node.getParent().removeChild(node);
+            SceneNode parent = node.getParent();
+            if (parent != null) {
+                parent.removeChild(node);
+            }
+
             node.cleanup();
+            autoSaveProject();
         }
     }
 
@@ -350,62 +342,36 @@ public class Engine {
         }
     }
 
-    public String getCurrentProjectPath() {
-        return currentProjectPath;
-    }
-
-    public void setCurrentProjectPath(String currentProjectPath) {
-        this.currentProjectPath = currentProjectPath;
-    }
-
-    public long getLastAutoSaveTime() {
-        return lastAutoSaveTime;
-    }
-
-    public String getLastAutoSaveMessage() {
-        return lastAutoSaveMessage;
-    }
-
-    public SceneNode getRootNode() {
-        return rootNode;
-    }
-
-    public List<Joint> getJoints() {
-        return joints;
-    }
-
-    public CommandHistory getCommandHistory() {
-        return commandHistory;
-    }
-
     private void loop() {
-        glClearColor(0.85f, 0.92f, 0.98f, 1.0f);
-
-        long lastTime = System.nanoTime();
+        double lastTime = glfwGetTime();
 
         while (!glfwWindowShouldClose(window)) {
-            long now = System.nanoTime();
-            float deltaTime = (now - lastTime) / 1_000_000_000.0f;
+            double now = glfwGetTime();
+            float deltaTime = (float) (now - lastTime);
             lastTime = now;
 
+            input.update();
+
+            glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+
             if (joints != null) {
-                for (Joint j : joints) {
-                    if (j.getMotor() != null) {
-                        j.getMotor().update(deltaTime);
+                for (Joint joint : joints) {
+                    if (joint != null && joint.getMotor() != null) {
+                        joint.getMotor().update(deltaTime);
                     }
                 }
             }
 
-            imguiLayer.newFrame();
+            SceneNode gizmoTarget = (selectionManager != null) ? selectionManager.getSelected() : null;
+            if (gizmoTarget != null && gizmoTarget.getParent() == null) {
+                gizmoTarget = null;
+            }
 
-            glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
-
-            input.update();
-
-            SceneNode gizmoTarget = selectionManager != null ? selectionManager.getSelected() : null;
             if (translateGizmo != null) {
                 translateGizmo.setTargetNode(gizmoTarget);
             }
+
+            imguiLayer.newFrame();
 
             boolean wantCaptureKeyboard = false;
             try {
@@ -414,7 +380,8 @@ public class Engine {
             }
 
             if (!wantCaptureKeyboard) {
-                boolean isCtrlDown = input.isKeyDown(GLFW_KEY_LEFT_CONTROL) || input.isKeyDown(GLFW_KEY_RIGHT_CONTROL);
+                boolean isCtrlDown = input.isKeyDown(GLFW_KEY_LEFT_CONTROL)
+                        || input.isKeyDown(GLFW_KEY_RIGHT_CONTROL);
                 boolean isShiftDown = input.isKeyDown(GLFW_KEY_LEFT_SHIFT) || input.isKeyDown(GLFW_KEY_RIGHT_SHIFT);
 
                 if (isCtrlDown && !isShiftDown && input.isKeyPressed(GLFW_KEY_Z)) {
@@ -429,9 +396,11 @@ public class Engine {
                 }
 
                 if (input.isKeyPressed(GLFW_KEY_DELETE)) {
-                    SceneNode selected = selectionManager != null ? selectionManager.getSelected() : null;
-                    if (selected != null) {
-                        deleteNode(selected);
+                    if (selectionManager != null) {
+                        SceneNode sel = selectionManager.getSelected();
+                        if (sel != null && sel.getParent() != null) {
+                            deleteNode(sel);
+                        }
                     }
                 }
             }
@@ -444,21 +413,17 @@ public class Engine {
 
             if (!wantCaptureMouse) {
                 if (input.isMouseButtonClicked(GLFW_MOUSE_BUTTON_LEFT)) {
-                    if (pointAlignTool != null && pointAlignTool.isPicking()) {
-                        pointAlignTool.onSceneClick(input.getMouseX(), input.getMouseY(), camera, width, height);
-                    } else {
-                        boolean pickedGizmo = false;
-                        if (translateGizmo != null) {
-                            pickedGizmo = translateGizmo.onMouseDown(input.getMouseX(), input.getMouseY(), camera,
-                                    width, height);
-                        }
+                    boolean pickedGizmo = false;
+                    if (translateGizmo != null) {
+                        pickedGizmo = translateGizmo.onMouseDown(input.getMouseX(), input.getMouseY(), camera,
+                                width, height);
+                    }
 
-                        if (!pickedGizmo) {
-                            SceneNode picked = Picker.pick(input.getMouseX(), input.getMouseY(), width, height, camera,
-                                    rootNode);
-                            if (picked != null && selectionManager != null) {
-                                selectionManager.select(picked);
-                            }
+                    if (!pickedGizmo) {
+                        SceneNode picked = Picker.pick(input.getMouseX(), input.getMouseY(), width, height, camera,
+                                rootNode);
+                        if (picked != null && selectionManager != null) {
+                            selectionManager.select(picked);
                         }
                     }
                 }
@@ -484,17 +449,6 @@ public class Engine {
 
             if (translateGizmo != null) {
                 translateGizmo.render(camera, width, height);
-
-                if (pointAlignTool != null) {
-                    if (pointAlignTool.getPickedParentPointWorld() != null) {
-                        translateGizmo.renderPointMarker(pointAlignTool.getPickedParentPointWorld(), camera, 1.0f,
-                                0.55f, 0.0f);
-                    }
-                    if (pointAlignTool.getPickedChildPointWorld() != null) {
-                        translateGizmo.renderPointMarker(pointAlignTool.getPickedChildPointWorld(), camera, 0.85f,
-                                0.25f, 0.95f);
-                    }
-                }
             }
 
             if (toolbarPanel != null) {
@@ -509,16 +463,12 @@ public class Engine {
             if (inspectorPanel != null) {
                 inspectorPanel.render();
             }
-            imguiLayer.render();
 
-            if (!input.isMouseButtonDown(GLFW_MOUSE_BUTTON_LEFT)) {
-                HierarchyPanel.draggedNode = null;
-            }
+            imguiLayer.render();
 
             glfwSwapBuffers(window);
             glfwPollEvents();
 
-            // fps limit
             if (fpsLimit > 0) {
                 double targetFrameTime = 1.0 / fpsLimit;
 
@@ -544,6 +494,24 @@ public class Engine {
         if (translateGizmo != null) {
             translateGizmo.cleanup();
         }
-        renderer.cleanup();
+        if (renderer != null) {
+            renderer.cleanup();
+        }
+        if (rootNode != null) {
+            rootNode.cleanup();
+        }
+    }
+
+    private void cleanup() {
+        imguiLayer.dispose();
+
+        glfwFreeCallbacks(window);
+        glfwDestroyWindow(window);
+
+        glfwTerminate();
+        GLFWErrorCallback callback = glfwSetErrorCallback(null);
+        if (callback != null) {
+            callback.free();
+        }
     }
 }

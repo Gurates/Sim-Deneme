@@ -10,13 +10,13 @@ import static org.lwjgl.glfw.GLFW.*;
 public class Camera {
     private final Vector3f position;
     private final Vector3f rotation;
-    
+
     private final Vector3f orbitTarget = new Vector3f(0, 0, 0);
     private float orbitDistance = 10.0f;
 
     private final Matrix4f viewMatrix;
     private final Matrix4f projectionMatrix;
-    
+
     private float aspectRatio;
     private static final float FOV = (float) Math.toRadians(60.0f);
     private static final float Z_NEAR = 0.01f;
@@ -67,52 +67,49 @@ public class Camera {
         if (input.isMouseButtonDown(GLFW_MOUSE_BUTTON_RIGHT)) {
             rotation.y += Math.toRadians(dx);
             rotation.x += Math.toRadians(dy);
-            
+
             rotation.x = Math.max((float) Math.toRadians(-89), Math.min((float) Math.toRadians(89), rotation.x));
 
             Vector3f forward = new Vector3f(
-                (float) (Math.sin(rotation.y) * Math.cos(rotation.x)),
-                (float) -Math.sin(rotation.x),
-                (float) (-Math.cos(rotation.y) * Math.cos(rotation.x))
-            ).normalize();
+                    (float) (Math.sin(rotation.y) * Math.cos(rotation.x)),
+                    (float) -Math.sin(rotation.x),
+                    (float) (-Math.cos(rotation.y) * Math.cos(rotation.x))).normalize();
 
             Vector3f right = new Vector3f(
-                (float) Math.cos(rotation.y),
-                0,
-                (float) Math.sin(rotation.y)
-            ).normalize();
+                    (float) Math.cos(rotation.y),
+                    0,
+                    (float) Math.sin(rotation.y)).normalize();
 
-            if (input.isKeyDown(GLFW_KEY_W)) position.add(forward.mul(moveSpeed * deltaTime));
-            if (input.isKeyDown(GLFW_KEY_S)) position.sub(forward.mul(moveSpeed * deltaTime));
-            if (input.isKeyDown(GLFW_KEY_A)) position.sub(right.mul(moveSpeed * deltaTime));
-            if (input.isKeyDown(GLFW_KEY_D)) position.add(right.mul(moveSpeed * deltaTime));
-            if (input.isKeyDown(GLFW_KEY_SPACE)) position.y += moveSpeed * deltaTime;
-            if (input.isKeyDown(GLFW_KEY_LEFT_SHIFT)) position.y -= moveSpeed * deltaTime;
+            if (input.isKeyDown(GLFW_KEY_W))
+                position.add(forward.mul(moveSpeed * deltaTime));
+            if (input.isKeyDown(GLFW_KEY_S))
+                position.sub(forward.mul(moveSpeed * deltaTime));
+            if (input.isKeyDown(GLFW_KEY_A))
+                position.sub(right.mul(moveSpeed * deltaTime));
+            if (input.isKeyDown(GLFW_KEY_D))
+                position.add(right.mul(moveSpeed * deltaTime));
+            if (input.isKeyDown(GLFW_KEY_SPACE))
+                position.y += moveSpeed * deltaTime;
+            if (input.isKeyDown(GLFW_KEY_LEFT_SHIFT))
+                position.y -= moveSpeed * deltaTime;
 
             if (scroll != 0) {
                 position.add(forward.mul(scroll * zoomSpeed));
             }
-            
+
         } else if (input.isMouseButtonDown(GLFW_MOUSE_BUTTON_LEFT)) {
             rotation.y += Math.toRadians(dx);
             rotation.x += Math.toRadians(dy);
-            
+
             rotation.x = Math.max((float) Math.toRadians(-89), Math.min((float) Math.toRadians(89), rotation.x));
-            
-            float horizontalDistance = (float) (orbitDistance * Math.cos(rotation.x));
-            float verticalDistance = (float) (orbitDistance * Math.sin(rotation.x));
-            
-            float xOffset = (float) (horizontalDistance * Math.sin(-rotation.y));
-            float zOffset = (float) (horizontalDistance * Math.cos(-rotation.y));
-            
-            position.set(orbitTarget.x + xOffset, orbitTarget.y + verticalDistance, orbitTarget.z + zOffset);
+
         } else if (scroll != 0) {
             float horizontalDistance = (float) (orbitDistance * Math.cos(rotation.x));
             float verticalDistance = (float) (orbitDistance * Math.sin(rotation.x));
-            
+
             float xOffset = (float) (horizontalDistance * Math.sin(-rotation.y));
             float zOffset = (float) (horizontalDistance * Math.cos(-rotation.y));
-            
+
             position.set(orbitTarget.x + xOffset, orbitTarget.y + verticalDistance, orbitTarget.z + zOffset);
         }
     }

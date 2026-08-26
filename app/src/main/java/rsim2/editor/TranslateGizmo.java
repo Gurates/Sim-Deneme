@@ -39,9 +39,6 @@ public class TranslateGizmo {
     private int vao;
     private int vbo;
 
-    private int markerVao;
-    private int markerVbo;
-
     private int boxVao;
     private int boxVbo;
 
@@ -87,32 +84,7 @@ public class TranslateGizmo {
         glBindBuffer(GL_ARRAY_BUFFER, 0);
         glBindVertexArray(0);
 
-        setupMarkerMesh();
         setupBoxMesh();
-    }
-
-    private void setupMarkerMesh() {
-        float s = 0.08f;
-        float[] markerVerts = new float[] {
-                -s, 0.0f, 0.0f, s, 0.0f, 0.0f,
-                0.0f, -s, 0.0f, 0.0f, s, 0.0f,
-                0.0f, 0.0f, -s, 0.0f, 0.0f, s
-        };
-        markerVao = glGenVertexArrays();
-        glBindVertexArray(markerVao);
-
-        FloatBuffer buffer = BufferUtils.createFloatBuffer(markerVerts.length);
-        buffer.put(markerVerts).flip();
-
-        markerVbo = glGenBuffers();
-        glBindBuffer(GL_ARRAY_BUFFER, markerVbo);
-        glBufferData(GL_ARRAY_BUFFER, buffer, GL_STATIC_DRAW);
-
-        glVertexAttribPointer(0, 3, GL_FLOAT, false, 3 * Float.BYTES, 0);
-        glEnableVertexAttribArray(0);
-
-        glBindBuffer(GL_ARRAY_BUFFER, 0);
-        glBindVertexArray(0);
     }
 
     private void setupBoxMesh() {
@@ -278,47 +250,10 @@ public class TranslateGizmo {
         boxModel.get(modelBuf);
         glUniformMatrix4fv(modelLoc, false, modelBuf);
 
-        // Electric cyan wireframe highlight
         glUniform4f(colorLoc, 0.15f, 0.85f, 1.0f, 0.9f);
 
         glBindVertexArray(boxVao);
         glDrawArrays(GL_LINES, 0, 24);
-        glBindVertexArray(0);
-
-        gizmoShader.unbind();
-
-        glLineWidth(1.0f);
-        glEnable(GL_DEPTH_TEST);
-    }
-
-    public void renderPointMarker(Vector3f worldPos, Camera camera, float r, float g, float b) {
-        if (worldPos == null || gizmoShader == null) {
-            return;
-        }
-
-        modelMatrix.identity().translation(worldPos);
-
-        glDisable(GL_DEPTH_TEST);
-        glLineWidth(3.0f);
-
-        gizmoShader.bind();
-
-        FloatBuffer projBuf = BufferUtils.createFloatBuffer(16);
-        camera.getProjectionMatrix().get(projBuf);
-        glUniformMatrix4fv(projLoc, false, projBuf);
-
-        FloatBuffer viewBuf = BufferUtils.createFloatBuffer(16);
-        camera.getViewMatrix().get(viewBuf);
-        glUniformMatrix4fv(viewLoc, false, viewBuf);
-
-        FloatBuffer modelBuf = BufferUtils.createFloatBuffer(16);
-        modelMatrix.get(modelBuf);
-        glUniformMatrix4fv(modelLoc, false, modelBuf);
-
-        glUniform4f(colorLoc, r, g, b, 1.0f);
-
-        glBindVertexArray(markerVao);
-        glDrawArrays(GL_LINES, 0, 6);
         glBindVertexArray(0);
 
         gizmoShader.unbind();
@@ -481,10 +416,6 @@ public class TranslateGizmo {
             glDeleteVertexArrays(vao);
         if (vbo != 0)
             glDeleteBuffers(vbo);
-        if (markerVao != 0)
-            glDeleteVertexArrays(markerVao);
-        if (markerVbo != 0)
-            glDeleteBuffers(markerVbo);
         if (boxVao != 0)
             glDeleteVertexArrays(boxVao);
         if (boxVbo != 0)

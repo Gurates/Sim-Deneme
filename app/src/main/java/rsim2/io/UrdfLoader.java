@@ -49,6 +49,10 @@ public class UrdfLoader {
         doc.getDocumentElement().normalize();
 
         Element rootElem = doc.getDocumentElement();
+        if ("mujoco".equalsIgnoreCase(rootElem.getTagName())) {
+            return MjcfLoader.load(urdfFilePath, rotateZUpToYUp);
+        }
+
         String robotName = rootElem.getAttribute("name");
         if (robotName == null || robotName.trim().isEmpty()) {
             robotName = "URDF_Robot";
@@ -57,7 +61,6 @@ public class UrdfLoader {
         UrdfResult result = new UrdfResult();
         result.robotName = robotName;
 
-        // 1. Parse all <link> elements
         NodeList linkNodes = rootElem.getElementsByTagName("link");
         for (int i = 0; i < linkNodes.getLength(); i++) {
             Node lNode = linkNodes.item(i);
@@ -73,7 +76,6 @@ public class UrdfLoader {
             List<Mesh> meshes = new ArrayList<>();
             Vector3f linkScale = new Vector3f(1.0f, 1.0f, 1.0f);
 
-            // Parse <visual> tags inside <link>
             NodeList visualNodes = linkElem.getElementsByTagName("visual");
             for (int v = 0; v < visualNodes.getLength(); v++) {
                 Node vNode = visualNodes.item(v);
@@ -81,12 +83,10 @@ public class UrdfLoader {
                     continue;
                 Element visualElem = (Element) vNode;
 
-                // Check <geometry>
                 NodeList geomNodes = visualElem.getElementsByTagName("geometry");
                 if (geomNodes.getLength() > 0) {
                     Element geomElem = (Element) geomNodes.item(0);
 
-                    // Check <mesh filename="...">
                     NodeList meshNodes = geomElem.getElementsByTagName("mesh");
                     if (meshNodes.getLength() > 0) {
                         Element meshElem = (Element) meshNodes.item(0);
@@ -136,7 +136,6 @@ public class UrdfLoader {
             result.linksById.put(linkName, sceneNode);
         }
 
-        // 2. Parse all <joint> elements
         NodeList jointNodes = rootElem.getElementsByTagName("joint");
         for (int i = 0; i < jointNodes.getLength(); i++) {
             Node jNode = jointNodes.item(i);
@@ -171,7 +170,6 @@ public class UrdfLoader {
             SceneNode parentNode = result.linksById.get(parentName);
             SceneNode childNode = result.linksById.get(childName);
 
-            // Parse <origin xyz="x y z" rpy="r p y"/>
             Vector3f originPos = new Vector3f(0.0f, 0.0f, 0.0f);
             Vector3f originRpy = new Vector3f(0.0f, 0.0f, 0.0f);
 
@@ -191,7 +189,6 @@ public class UrdfLoader {
                 }
             }
 
-            // Parse <axis xyz="x y z"/>
             Vector3f axis = new Vector3f(0.0f, 0.0f, 1.0f);
             NodeList axisNodes = jointElem.getElementsByTagName("axis");
             if (axisNodes.getLength() > 0) {
@@ -203,7 +200,6 @@ public class UrdfLoader {
                 }
             }
 
-            // Parse <limit lower="..." upper="..." velocity="..."/>
             float lowerLimit = -(float) Math.PI;
             float upperLimit = (float) Math.PI;
             float maxSpeed = 2.0f;
@@ -251,7 +247,6 @@ public class UrdfLoader {
             }
         }
 
-        // 3. Find root node (the link that has no parent)
         for (SceneNode node : result.linksById.values()) {
             if (node.getParent() == null) {
                 result.rootNode = node;
@@ -263,8 +258,6 @@ public class UrdfLoader {
             result.rootNode = result.linksById.values().iterator().next();
         }
 
-        // 4. Optionally convert root orientation from Z-up (URDF/ROS standard) to Y-up
-        // (OpenGL standard)
         if (rotateZUpToYUp && result.rootNode != null) {
             result.rootNode.getLocalRotation().rotateX((float) Math.toRadians(-90));
         }
@@ -298,30 +291,25 @@ public class UrdfLoader {
             cleaned = cleaned.substring(7);
         }
 
-        // 1. If absolute path and exists
         File direct = new File(cleaned);
         if (direct.isAbsolute() && direct.exists()) {
             return direct;
         }
 
-        // 2. If package://package_name/path/to/mesh
         if (cleaned.startsWith("package://")) {
-            String pathWithoutPackagePrefix = cleaned.substring(10); // e.g. "so100/meshes/base.stl"
+            String pathWithoutPackagePrefix = cleaned.substring(10);
             int slashIdx = pathWithoutPackagePrefix.indexOf('/');
             String subPath = (slashIdx >= 0) ? pathWithoutPackagePrefix.substring(slashIdx + 1)
-                    : pathWithoutPackagePrefix; // e.g. "meshes/base.stl"
+                    : pathWithoutPackagePrefix;
 
-            // Try relative to baseDir with subPath
             File try1 = new File(baseDir, subPath);
             if (try1.exists())
                 return try1;
 
-            // Try relative to baseDir with pathWithoutPackagePrefix
             File try2 = new File(baseDir, pathWithoutPackagePrefix);
             if (try2.exists())
                 return try2;
 
-            // Try in parent of baseDir
             if (baseDir.getParentFile() != null) {
                 File try3 = new File(baseDir.getParentFile(), subPath);
                 if (try3.exists())
@@ -332,18 +320,15 @@ public class UrdfLoader {
                     return try4;
             }
 
-            // Search by filename inside baseDir recursively
             File found = findFileRecursively(baseDir, new File(cleaned).getName());
             if (found != null)
                 return found;
         }
 
-        // 3. Try relative to baseDir
         File rel = new File(baseDir, cleaned);
         if (rel.exists())
             return rel;
 
-        // 4. Try in common subdirectories like meshes/ or visual/
         File inMeshes = new File(baseDir, "meshes/" + new File(cleaned).getName());
         if (inMeshes.exists())
             return inMeshes;
@@ -352,13 +337,10 @@ public class UrdfLoader {
         if (inVisual.exists())
             return inVisual;
 
-        // 5. Search recursively by file name
         File found = findFileRecursively(baseDir, new File(cleaned).getName());
         if (found != null)
             return found;
 
-        // 6. If filename ends with .dae, try looking for .stl or .obj with same
-        // basename
         String lowerName = new File(cleaned).getName().toLowerCase();
         if (lowerName.endsWith(".dae")) {
             String baseNoExt = lowerName.substring(0, lowerName.length() - 4);
