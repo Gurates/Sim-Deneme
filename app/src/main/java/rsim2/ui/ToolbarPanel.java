@@ -27,13 +27,15 @@ public class ToolbarPanel {
 
     private final ImInt selectedUpAxisIdx = new ImInt(0);
     private int importTypePending = 0;
+    private final AIPanel aiPanel;
 
     public ToolbarPanel(Engine engine, SceneNode rootNode, SelectionManager selectionManager,
-            CommandHistory commandHistory) {
+            CommandHistory commandHistory, AIPanel aiPanel) {
         this.engine = engine;
         this.rootNode = rootNode;
         this.selectionManager = selectionManager;
         this.commandHistory = commandHistory;
+        this.aiPanel = aiPanel;
     }
 
     public void setRootNode(SceneNode rootNode) {
@@ -110,7 +112,7 @@ public class ToolbarPanel {
         ImGui.popStyleColor(2);
         if (ImGui.isItemHovered()) {
             ImGui.setTooltip(
-                    "Import URDF/XML Robot: Tek tıkla tüm linkleri, eklemleri, eksenleri ve limitleri otomatik kurar.");
+                    "Import URDF/XML Robot: Automatically builds all links, joints, axes and limits in one click.");
         }
 
         ImGui.sameLine();
@@ -232,7 +234,27 @@ public class ToolbarPanel {
             ImGui.sameLine();
             ImGui.textDisabled("|");
             ImGui.sameLine();
-            ImGui.textColored(0.4f, 0.85f, 0.4f, 1.0f, "Kaydedildi");
+            ImGui.textColored(0.4f, 0.85f, 0.4f, 1.0f, "Saved");
+        }
+
+        ImGui.sameLine();
+        ImGui.textDisabled("|");
+        ImGui.sameLine();
+
+        boolean aiActive = (aiPanel != null && aiPanel.isVisible());
+        if (aiActive) {
+            ImGui.pushStyleColor(imgui.flag.ImGuiCol.Button, 0.2f, 0.55f, 0.85f, 1.0f);
+        }
+        if (ImGui.button("AI", 45.0f, 24.0f)) {
+            if (aiPanel != null) {
+                aiPanel.toggleVisible();
+            }
+        }
+        if (aiActive) {
+            ImGui.popStyleColor();
+        }
+        if (ImGui.isItemHovered()) {
+            ImGui.setTooltip("AI Assistant: Robot control and analysis panel");
         }
 
         ImGui.end();

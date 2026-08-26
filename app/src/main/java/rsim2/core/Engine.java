@@ -52,6 +52,7 @@ public class Engine {
     private HierarchyPanel hierarchyPanel;
     private AllJointsPanel allJointsPanel;
     private InspectorPanel inspectorPanel;
+    private AIPanel aiPanel;
 
     private SceneNode rootNode;
     private List<Joint> joints = new ArrayList<>();
@@ -162,7 +163,8 @@ public class Engine {
         joints = new ArrayList<>();
         currentProjectPath = null;
 
-        toolbarPanel = new ToolbarPanel(this, rootNode, selectionManager, commandHistory);
+        aiPanel = new AIPanel(this, rootNode, selectionManager, joints);
+        toolbarPanel = new ToolbarPanel(this, rootNode, selectionManager, commandHistory, aiPanel);
         hierarchyPanel = new HierarchyPanel(rootNode, selectionManager);
         allJointsPanel = new AllJointsPanel(this, rootNode, joints, commandHistory);
         inspectorPanel = new InspectorPanel(this, rootNode, selectionManager, joints, commandHistory);
@@ -209,6 +211,10 @@ public class Engine {
                 inspectorPanel.setRootNode(this.rootNode);
                 inspectorPanel.setJoints(this.joints);
                 inspectorPanel.setCommandHistory(this.commandHistory);
+            }
+            if (aiPanel != null) {
+                aiPanel.setRootNode(this.rootNode);
+                aiPanel.setJoints(this.joints);
             }
         } catch (Exception e) {
             e.printStackTrace();
@@ -260,6 +266,10 @@ public class Engine {
                 inspectorPanel.setRootNode(this.rootNode);
                 inspectorPanel.setJoints(this.joints);
                 inspectorPanel.setCommandHistory(this.commandHistory);
+            }
+            if (aiPanel != null) {
+                aiPanel.setRootNode(this.rootNode);
+                aiPanel.setJoints(this.joints);
             }
 
             saveProject(jsonPath);
@@ -462,6 +472,9 @@ public class Engine {
             }
             if (inspectorPanel != null) {
                 inspectorPanel.render();
+            }
+            if (aiPanel != null) {
+                aiPanel.render();
             }
 
             imguiLayer.render();
