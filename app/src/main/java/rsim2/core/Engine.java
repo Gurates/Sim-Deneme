@@ -17,6 +17,7 @@ import rsim2.graphics.Renderer;
 import rsim2.input.Input;
 import rsim2.io.RobotJsonIO;
 import rsim2.io.UrdfLoader;
+import rsim2.motion.MotionPlayer;
 import rsim2.scene.Joint;
 import rsim2.scene.SceneNode;
 import rsim2.ui.*;
@@ -53,6 +54,8 @@ public class Engine {
     private AllJointsPanel allJointsPanel;
     private InspectorPanel inspectorPanel;
     private AIPanel aiPanel;
+    private BridgePanel bridgePanel;
+    private MotionPlayer motionPlayer;
 
     private SceneNode rootNode;
     private List<Joint> joints = new ArrayList<>();
@@ -162,9 +165,11 @@ public class Engine {
         rootNode = new SceneNode("world");
         joints = new ArrayList<>();
         currentProjectPath = null;
+        motionPlayer = new MotionPlayer();
 
-        aiPanel = new AIPanel(this, rootNode, selectionManager, joints);
-        toolbarPanel = new ToolbarPanel(this, rootNode, selectionManager, commandHistory, aiPanel);
+        aiPanel = new AIPanel(this, rootNode, selectionManager, joints, motionPlayer);
+        bridgePanel = new BridgePanel(motionPlayer);
+        toolbarPanel = new ToolbarPanel(this, rootNode, selectionManager, commandHistory, aiPanel, bridgePanel);
         hierarchyPanel = new HierarchyPanel(rootNode, selectionManager);
         allJointsPanel = new AllJointsPanel(this, rootNode, joints, commandHistory);
         inspectorPanel = new InspectorPanel(this, rootNode, selectionManager, joints, commandHistory);
@@ -212,9 +217,13 @@ public class Engine {
                 inspectorPanel.setJoints(this.joints);
                 inspectorPanel.setCommandHistory(this.commandHistory);
             }
+            if (motionPlayer != null) {
+                motionPlayer.stop();
+            }
             if (aiPanel != null) {
                 aiPanel.setRootNode(this.rootNode);
                 aiPanel.setJoints(this.joints);
+                aiPanel.setMotionPlayer(this.motionPlayer);
             }
         } catch (Exception e) {
             e.printStackTrace();
@@ -267,9 +276,13 @@ public class Engine {
                 inspectorPanel.setJoints(this.joints);
                 inspectorPanel.setCommandHistory(this.commandHistory);
             }
+            if (motionPlayer != null) {
+                motionPlayer.stop();
+            }
             if (aiPanel != null) {
                 aiPanel.setRootNode(this.rootNode);
                 aiPanel.setJoints(this.joints);
+                aiPanel.setMotionPlayer(this.motionPlayer);
             }
 
             saveProject(jsonPath);
@@ -303,6 +316,18 @@ public class Engine {
 
     public String getCurrentProjectPath() {
         return currentProjectPath;
+    }
+
+    public MotionPlayer getMotionPlayer() {
+        return motionPlayer;
+    }
+
+    public BridgePanel getBridgePanel() {
+        return bridgePanel;
+    }
+
+    public List<Joint> getJoints() {
+        return joints;
     }
 
     public long getLastAutoSaveTime() {
@@ -364,12 +389,16 @@ public class Engine {
 
             glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
-            if (joints != null) {
+            if (motionPlayer != null && motionPlayer.isPlaying()) {
+                motionPlayer.update(deltaTime, joints);
+                rsim2.bridge.BridgeManager.getInstance().streamCurrentJointStates(joints, motionPlayer.getCurrentTime());
+            } else if (joints != null) {
                 for (Joint joint : joints) {
                     if (joint != null && joint.getMotor() != null) {
                         joint.getMotor().update(deltaTime);
                     }
                 }
+                rsim2.bridge.BridgeManager.getInstance().streamCurrentJointStates(joints, 0.0f);
             }
 
             SceneNode gizmoTarget = (selectionManager != null) ? selectionManager.getSelected() : null;
@@ -475,6 +504,9 @@ public class Engine {
             }
             if (aiPanel != null) {
                 aiPanel.render();
+            }
+            if (bridgePanel != null) {
+                bridgePanel.render();
             }
 
             imguiLayer.render();

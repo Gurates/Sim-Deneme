@@ -21,6 +21,7 @@ public class Mesh {
     private final Vector3f maxBound;
 
     private final float[] vertices;
+    private final float[] normals;
     private final int[] indices;
     private String sourcePath;
 
@@ -30,6 +31,7 @@ public class Mesh {
 
     public Mesh(float[] vertices, float[] normals, int[] indices, String sourcePath) {
         this.vertices = vertices;
+        this.normals = normals;
         this.indices = indices;
         this.sourcePath = sourcePath;
         this.vertexCount = indices != null ? indices.length : 0;
@@ -91,6 +93,29 @@ public class Mesh {
         glBindVertexArray(0);
     }
 
+    public static Mesh createScaled(Mesh original, Vector3f scale) {
+        if (original == null) return null;
+        if (scale == null || (scale.x == 1.0f && scale.y == 1.0f && scale.z == 1.0f)) {
+            return original;
+        }
+
+        float[] origVerts = original.getVertices();
+        if (origVerts == null || origVerts.length == 0) {
+            return original;
+        }
+
+        float[] scaledVerts = new float[origVerts.length];
+        for (int i = 0; i < origVerts.length; i += 3) {
+            scaledVerts[i] = origVerts[i] * scale.x;
+            if (i + 1 < origVerts.length) scaledVerts[i + 1] = origVerts[i + 1] * scale.y;
+            if (i + 2 < origVerts.length) scaledVerts[i + 2] = origVerts[i + 2] * scale.z;
+        }
+
+        Mesh scaled = new Mesh(scaledVerts, original.getNormals(), original.getIndices(), original.getSourcePath());
+        original.cleanup();
+        return scaled;
+    }
+
     public void render() {
         glBindVertexArray(vao);
         glDrawElements(GL_TRIANGLES, vertexCount, GL_UNSIGNED_INT, 0);
@@ -99,6 +124,10 @@ public class Mesh {
 
     public float[] getVertices() {
         return vertices;
+    }
+
+    public float[] getNormals() {
+        return normals;
     }
 
     public int[] getIndices() {

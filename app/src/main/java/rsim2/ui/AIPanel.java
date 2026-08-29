@@ -14,6 +14,7 @@ import rsim2.ai.AiConfig;
 import rsim2.ai.AiService;
 import rsim2.core.Engine;
 import rsim2.editor.SelectionManager;
+import rsim2.motion.MotionPlayer;
 import rsim2.scene.Joint;
 import rsim2.scene.SceneNode;
 
@@ -32,6 +33,7 @@ public class AIPanel {
     private SceneNode rootNode;
     private SelectionManager selectionManager;
     private List<Joint> joints;
+    private MotionPlayer motionPlayer;
 
     private final AiConfig config;
     private final AiService aiService;
@@ -60,14 +62,19 @@ public class AIPanel {
     }
 
     public AIPanel() {
-        this(null, null, null, null);
+        this(null, null, null, null, null);
     }
 
     public AIPanel(Engine engine, SceneNode rootNode, SelectionManager selectionManager, List<Joint> joints) {
+        this(engine, rootNode, selectionManager, joints, null);
+    }
+
+    public AIPanel(Engine engine, SceneNode rootNode, SelectionManager selectionManager, List<Joint> joints, MotionPlayer motionPlayer) {
         this.engine = engine;
         this.rootNode = rootNode;
         this.selectionManager = selectionManager;
         this.joints = joints != null ? joints : new ArrayList<>();
+        this.motionPlayer = motionPlayer != null ? motionPlayer : new MotionPlayer();
 
         this.config = AiConfig.load();
         this.aiService = new AiService();
@@ -78,10 +85,10 @@ public class AIPanel {
 
         syncModelIndexFromConfig();
 
-        chatHistory.add(new ChatMessage("AI", "Hello! I am the Robot Simulator AI Assistant. You can ask me questions or instruct me to move the robot.", false));
+        chatHistory.add(new ChatMessage("AI", "Hello! I am your Robot AI Assistant. You can ask me to generate motion trajectories (e.g., 'wave hand', 'bend elbow 45 degrees'), analyze kinematics, or explain robot properties.", false));
 
         if (config.getActiveApiKey().isEmpty()) {
-            chatHistory.add(new ChatMessage("System", "No API Key entered yet. Please click the 'Settings' button above to configure your Gemini or OpenAI API key.", false));
+            chatHistory.add(new ChatMessage("System", "No API Key entered yet. Please click the 'Settings' button above to configure your Google Gemini or OpenAI API key.", false));
         }
     }
 
@@ -121,6 +128,14 @@ public class AIPanel {
 
     public void setJoints(List<Joint> joints) {
         this.joints = joints != null ? joints : new ArrayList<>();
+    }
+
+    public void setMotionPlayer(MotionPlayer motionPlayer) {
+        this.motionPlayer = motionPlayer != null ? motionPlayer : new MotionPlayer();
+    }
+
+    public MotionPlayer getMotionPlayer() {
+        return motionPlayer;
     }
 
     public boolean isVisible() {
@@ -211,7 +226,7 @@ public class AIPanel {
             }
 
             if (isLoading) {
-                ImGui.textColored(0.7f, 0.7f, 0.7f, 1.0f, "AI is typing...");
+                ImGui.textColored(0.7f, 0.7f, 0.7f, 1.0f, "AI is thinking & planning motion...");
             }
 
             if (ImGui.getScrollY() >= ImGui.getScrollMaxY()) {
@@ -327,7 +342,7 @@ public class AIPanel {
         aiService.sendMessageAsync(config, userPrompt, systemContext, new AiService.ResponseCallback() {
             @Override
             public void onSuccess(String responseText) {
-                AiActionExecutor.ExecutionResult execRes = AiActionExecutor.processAndExecute(responseText, joints);
+                AiActionExecutor.ExecutionResult execRes = AiActionExecutor.processAndExecute(responseText, joints, motionPlayer);
                 chatHistory.add(new ChatMessage("AI", execRes.cleanedMessage, false));
                 if (execRes.hasActions && engine != null) {
                     engine.autoSaveProject();
@@ -345,19 +360,19 @@ public class AIPanel {
 
     private String buildRobotSystemContext() {
         StringBuilder sb = new StringBuilder();
-        sb.append("You are an intelligent robotics assistant for a 3D Robot Simulator (RSim2).\n");
-        sb.append("Answer user questions about the robot, perform kinematic analysis, or give robotics advice.\n\n");
+        sb.append("You are an intelligent robotics assistant for the 3D Robot Simulator (RSim2).\n");
+        sb.append("Answer user questions about the robot, perform kinematic analysis, or generate motion sequences.\n\n");
 
         if (joints != null && !joints.isEmpty()) {
-            sb.append("Currently loaded robot information in simulator:\n");
-            sb.append("- Total Joint Count: ").append(joints.size()).append("\n");
+            sb.append("Currently loaded robot configuration:\n");
+            sb.append("- Total Joints: ").append(joints.size()).append("\n");
             sb.append("Joints List:\n");
             for (Joint j : joints) {
                 float deg = (float) Math.toDegrees(j.getCurrentAngleRadians());
                 float minDeg = (float) Math.toDegrees(j.getMinLimit());
                 float maxDeg = (float) Math.toDegrees(j.getMaxLimit());
                 sb.append(String.format(
-                        "  • ID: %s | Type: %s | Parent: %s | Child: %s | Axis: (%.1f, %.1f, %.1f) | Current Angle: %.1f deg | Limits: [%.0f, %.0f]\n",
+                        "  - ID: %s | Type: %s | Parent: %s | Child: %s | Axis: (%.1f, %.1f, %.1f) | Current Angle: %.1f deg | Limits: [%.0f, %.0f]\n",
                         j.getId(),
                         j.getType().name(),
                         j.getParentNode() != null ? j.getParentNode().getId() : "world",
@@ -366,21 +381,55 @@ public class AIPanel {
                         deg, minDeg, maxDeg));
             }
 
-            sb.append("\nYOU HAVE ROBOT CONTROL CAPABILITIES:\n");
-            sb.append("When the user asks you to move the robot, reset positions, or set a joint to a specific angle, in addition to your clear explanation, ALWAYS append the following JSON action block at the very end of your response:\n");
+            sb.append("\nTIMED MOTION & TRAJECTORY PROTOCOL (IMPORTANT):\n");
+            sb.append("When the user asks you to perform a movement, animation, gesture, or time-series trajectory (e.g. 'wave hand', 'bow', 'raise arm', 'walk step', etc.), you MUST append the following JSON 'animation' block at the very end of your helpful response:\n");
             sb.append("```json\n");
             sb.append("{\n");
-            sb.append("  \"actions\": [\n");
-            sb.append("    {\"joint\": \"joint_id_or_ALL\", \"target_deg\": 45.0}\n");
-            sb.append("  ]\n");
+            sb.append("  \"animation\": {\n");
+            sb.append("    \"name\": \"Motion Name\",\n");
+            sb.append("    \"duration\": 2.0,\n");
+            sb.append("    \"loop\": true,\n");
+            sb.append("    \"keyframes\": [\n");
+            sb.append("      {\n");
+            sb.append("        \"time\": 0.0,\n");
+            sb.append("        \"joints\": {\n");
+            sb.append("          \"joint_id_1\": 0.0,\n");
+            sb.append("          \"joint_id_2\": 20.0\n");
+            sb.append("        }\n");
+            sb.append("      },\n");
+            sb.append("      {\n");
+            sb.append("        \"time\": 0.5,\n");
+            sb.append("        \"joints\": {\n");
+            sb.append("          \"joint_id_1\": 35.0,\n");
+            sb.append("          \"joint_id_2\": 40.0\n");
+            sb.append("        }\n");
+            sb.append("      },\n");
+            sb.append("      {\n");
+            sb.append("        \"time\": 1.0,\n");
+            sb.append("        \"joints\": {\n");
+            sb.append("          \"joint_id_1\": -35.0,\n");
+            sb.append("          \"joint_id_2\": 20.0\n");
+            sb.append("        }\n");
+            sb.append("      },\n");
+            sb.append("      {\n");
+            sb.append("        \"time\": 2.0,\n");
+            sb.append("        \"joints\": {\n");
+            sb.append("          \"joint_id_1\": 0.0,\n");
+            sb.append("          \"joint_id_2\": 20.0\n");
+            sb.append("        }\n");
+            sb.append("      }\n");
+            sb.append("    ]\n");
+            sb.append("  }\n");
             sb.append("}\n");
             sb.append("```\n");
             sb.append("Rules:\n");
-            sb.append("1. To reset all joints: {\"joint\": \"ALL\", \"target_deg\": 0.0}\n");
-            sb.append("2. To rotate a specific joint, use its exact ID (e.g., {\"joint\": \"joint1\", \"target_deg\": 90.0}).\n");
-            sb.append("3. Angles are in degrees. Never exceed joint limit ranges.\n");
+            sb.append("1. 'time': Timestamp in seconds starting from 0.0 up to duration.\n");
+            sb.append("2. 'joints': Target angle in degrees for each joint at that timestamp. Simulator smoothly interpolates between keyframes.\n");
+            sb.append("3. 'loop': Set to true for cyclic motions (waving, walking, idle, etc.).\n");
+            sb.append("4. Never exceed joint limits and only use valid joint IDs from the scene.\n");
+            sb.append("5. For instantaneous single-step changes, you can use 'actions' (e.g. {\"actions\": [{\"joint\": \"ALL\", \"target_deg\": 0.0}]}).\n");
         } else {
-            sb.append("There is currently no active robot model loaded in the scene.\n");
+            sb.append("No active robot model is currently loaded in the scene.\n");
         }
 
         return sb.toString();

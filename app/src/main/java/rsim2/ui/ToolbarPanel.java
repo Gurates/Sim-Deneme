@@ -1,8 +1,12 @@
 package rsim2.ui;
 
 import imgui.ImGui;
+import imgui.flag.ImGuiCol;
 import imgui.flag.ImGuiCond;
+import imgui.flag.ImGuiSliderFlags;
 import imgui.flag.ImGuiWindowFlags;
+import imgui.type.ImBoolean;
+import imgui.type.ImFloat;
 import imgui.type.ImInt;
 import org.lwjgl.PointerBuffer;
 import org.lwjgl.system.MemoryStack;
@@ -13,9 +17,9 @@ import rsim2.editor.SelectionManager;
 import rsim2.editor.UpAxis;
 import rsim2.editor.commands.CommandHistory;
 import rsim2.editor.commands.ImportModelCommand;
+import rsim2.motion.MotionPlayer;
+import rsim2.motion.MotionSequence;
 import rsim2.scene.SceneNode;
-
-import java.util.List;
 
 import static org.lwjgl.system.MemoryStack.stackPush;
 
@@ -28,14 +32,25 @@ public class ToolbarPanel {
     private final ImInt selectedUpAxisIdx = new ImInt(0);
     private int importTypePending = 0;
     private final AIPanel aiPanel;
+    private BridgePanel bridgePanel;
 
     public ToolbarPanel(Engine engine, SceneNode rootNode, SelectionManager selectionManager,
             CommandHistory commandHistory, AIPanel aiPanel) {
+        this(engine, rootNode, selectionManager, commandHistory, aiPanel, null);
+    }
+
+    public ToolbarPanel(Engine engine, SceneNode rootNode, SelectionManager selectionManager,
+            CommandHistory commandHistory, AIPanel aiPanel, BridgePanel bridgePanel) {
         this.engine = engine;
         this.rootNode = rootNode;
         this.selectionManager = selectionManager;
         this.commandHistory = commandHistory;
         this.aiPanel = aiPanel;
+        this.bridgePanel = bridgePanel;
+    }
+
+    public void setBridgePanel(BridgePanel bridgePanel) {
+        this.bridgePanel = bridgePanel;
     }
 
     public void setRootNode(SceneNode rootNode) {
@@ -60,7 +75,7 @@ public class ToolbarPanel {
 
         ImGui.begin("Toolbar", flags);
 
-        if (ImGui.button("Load Project", 95.0f, 24.0f)) {
+        if (ImGui.button("Load Project", 90.0f, 24.0f)) {
             try (MemoryStack stack = stackPush()) {
                 PointerBuffer filters = stack.mallocPointer(1);
                 filters.put(stack.UTF8("*.json"));
@@ -75,7 +90,7 @@ public class ToolbarPanel {
         }
 
         ImGui.sameLine();
-        if (ImGui.button("Save Project", 95.0f, 24.0f)) {
+        if (ImGui.button("Save Project", 90.0f, 24.0f)) {
             String currentPath = engine.getCurrentProjectPath();
             if (currentPath != null && !currentPath.trim().isEmpty()) {
                 engine.saveProject(currentPath);
@@ -93,9 +108,9 @@ public class ToolbarPanel {
         ImGui.textDisabled("|");
         ImGui.sameLine();
 
-        ImGui.pushStyleColor(imgui.flag.ImGuiCol.Button, 0.15f, 0.55f, 0.45f, 1.0f);
-        ImGui.pushStyleColor(imgui.flag.ImGuiCol.ButtonHovered, 0.20f, 0.68f, 0.55f, 1.0f);
-        if (ImGui.button("Import URDF", 95.0f, 24.0f)) {
+        ImGui.pushStyleColor(ImGuiCol.Button, 0.15f, 0.55f, 0.45f, 1.0f);
+        ImGui.pushStyleColor(ImGuiCol.ButtonHovered, 0.20f, 0.68f, 0.55f, 1.0f);
+        if (ImGui.button("Import URDF", 90.0f, 24.0f)) {
             try (MemoryStack stack = stackPush()) {
                 PointerBuffer filters = stack.mallocPointer(2);
                 filters.put(stack.UTF8("*.urdf"));
@@ -110,84 +125,39 @@ public class ToolbarPanel {
             }
         }
         ImGui.popStyleColor(2);
-        if (ImGui.isItemHovered()) {
-            ImGui.setTooltip(
-                    "Import URDF/XML Robot: Automatically builds all links, joints, axes and limits in one click.");
-        }
 
         ImGui.sameLine();
-        ImGui.textDisabled("|");
-        ImGui.sameLine();
-
-        if (ImGui.button("Import Model", 95.0f, 24.0f)) {
+        if (ImGui.button("Import Model", 90.0f, 24.0f)) {
+            ImGui.openPopup("Select Up Axis");
             importTypePending = 0;
-            ImGui.openPopup("Import 3D Model");
-        }
-        if (ImGui.isItemHovered()) {
-            ImGui.setTooltip("Import Model: 1 dosya = 1 link");
         }
 
-        ImGui.sameLine();
-        if (ImGui.button("Import Group", 95.0f, 24.0f)) {
-            importTypePending = 1;
-            ImGui.openPopup("Import 3D Model");
-        }
-        if (ImGui.isItemHovered()) {
-            ImGui.setTooltip("Import Model Group: Multiple files = Multiple SEPARATE links (offsets preserved)");
-        }
-
-        ImGui.sameLine();
-        if (ImGui.button("Multi-Part Link", 105.0f, 24.0f)) {
-            importTypePending = 2;
-            ImGui.openPopup("Import 3D Model");
-        }
-        if (ImGui.isItemHovered()) {
-            ImGui.setTooltip(
-                    "Import Multi-Part Link");
-        }
-
-        if (ImGui.beginPopupModal("Import 3D Model", ImGuiWindowFlags.AlwaysAutoResize)) {
-            ImGui.text("Select Model Coordinate System (Up Axis):");
+        if (ImGui.beginPopupModal("Select Up Axis", ImGuiWindowFlags.AlwaysAutoResize)) {
+            ImGui.text("What is the Up Axis orientation of the imported model?");
             ImGui.spacing();
 
-            ImGui.radioButton("Y-up (Unity, standard 3D meshes)", selectedUpAxisIdx, 0);
-            ImGui.radioButton("Z-up (SolidWorks, Fusion 360, CAD, Robotics)", selectedUpAxisIdx, 1);
+            String[] upAxisOptions = { "Y-Up (Blender / OpenGL / Unity)", "Z-Up (ROS / Gazebo / SolidWorks)" };
+            ImGui.combo("Up Axis", selectedUpAxisIdx, upAxisOptions);
 
-            ImGui.spacing();
-            ImGui.textDisabled("Note: If your model was exported from SolidWorks or Fusion 360, select Z-up.");
             ImGui.spacing();
             ImGui.separator();
             ImGui.spacing();
 
-            if (ImGui.button("Select File(s)...", 140.0f, 26.0f)) {
+            if (ImGui.button("Import", 100.0f, 26.0f)) {
                 UpAxis upAxis = (selectedUpAxisIdx.get() == 1) ? UpAxis.Z_UP : UpAxis.Y_UP;
                 ImGui.closeCurrentPopup();
 
                 if (importTypePending == 1) {
-                    List<SceneNode> group = ModelImporter.importModelsGroup(null, upAxis);
-                    if (!group.isEmpty()) {
-                        if (commandHistory != null) {
-                            commandHistory.executeAndRecord(new ImportModelCommand(group, rootNode, selectionManager));
-                        } else {
-                            for (SceneNode node : group) {
-                                rootNode.addChild(node);
-                            }
-                            if (selectionManager != null) {
-                                selectionManager.select(group.get(0));
-                            }
-                        }
-                    }
-                } else if (importTypePending == 2) {
-                    SceneNode multiLink = ModelImporter.importMultiMeshLink(null, upAxis);
-                    if (multiLink != null) {
-                        if (commandHistory != null) {
-                            commandHistory
-                                    .executeAndRecord(new ImportModelCommand(multiLink, rootNode, selectionManager));
-                        } else {
-                            rootNode.addChild(multiLink);
-                            if (selectionManager != null) {
-                                selectionManager.select(multiLink);
-                            }
+                    try (MemoryStack stack = stackPush()) {
+                        PointerBuffer filters = stack.mallocPointer(2);
+                        filters.put(stack.UTF8("*.urdf"));
+                        filters.put(stack.UTF8("*.xml"));
+                        filters.flip();
+
+                        String path = TinyFileDialogs.tinyfd_openFileDialog("Select URDF / XML Robot File", "", filters,
+                                "URDF / XML Robot Files (*.urdf, *.xml)", false);
+                        if (path != null && !path.trim().isEmpty()) {
+                            engine.loadUrdf(path);
                         }
                     }
                 } else {
@@ -222,28 +192,123 @@ public class ToolbarPanel {
         boolean canDelete = selected != null && selected.getParent() != null;
 
         ImGui.beginDisabled(!canDelete);
-        if (ImGui.button("Delete", 65.0f, 24.0f)) {
+        if (ImGui.button("Delete", 60.0f, 24.0f)) {
             if (selected != null) {
                 engine.deleteNode(selected);
             }
         }
         ImGui.endDisabled();
 
-        long now = System.currentTimeMillis();
-        if (now - engine.getLastAutoSaveTime() < 2000) {
+        MotionPlayer motionPlayer = engine.getMotionPlayer();
+        boolean hasSequence = (motionPlayer != null && motionPlayer.hasSequence());
+
+        float centerControlsWidth = 330.0f;
+        float centerStartX = (displayWidth - centerControlsWidth) * 0.5f;
+
+        if (ImGui.getCursorPosX() < centerStartX) {
+            ImGui.sameLine(centerStartX);
+        } else {
             ImGui.sameLine();
-            ImGui.textDisabled("|");
-            ImGui.sameLine();
-            ImGui.textColored(0.4f, 0.85f, 0.4f, 1.0f, "Saved");
+        }
+
+        ImGui.textDisabled("|");
+        ImGui.sameLine();
+
+        boolean isPlaying = (motionPlayer != null && motionPlayer.isPlaying());
+        if (isPlaying) {
+            ImGui.pushStyleColor(ImGuiCol.Button, 0.85f, 0.50f, 0.15f, 1.0f);
+            ImGui.pushStyleColor(ImGuiCol.ButtonHovered, 0.95f, 0.60f, 0.25f, 1.0f);
+            if (ImGui.button("|| Pause", 68.0f, 24.0f)) {
+                if (motionPlayer != null) {
+                    motionPlayer.pause();
+                }
+            }
+            ImGui.popStyleColor(2);
+        } else {
+            if (hasSequence) {
+                ImGui.pushStyleColor(ImGuiCol.Button, 0.18f, 0.68f, 0.35f, 1.0f);
+                ImGui.pushStyleColor(ImGuiCol.ButtonHovered, 0.22f, 0.78f, 0.42f, 1.0f);
+            }
+            if (ImGui.button("> Play", 68.0f, 24.0f)) {
+                if (motionPlayer != null) {
+                    motionPlayer.play();
+                }
+            }
+            if (hasSequence) {
+                ImGui.popStyleColor(2);
+            }
+        }
+        if (ImGui.isItemHovered()) {
+            ImGui.setTooltip(hasSequence ? "Play / Pause Motion" : "Generate a motion in AI panel to play it here.");
         }
 
         ImGui.sameLine();
-        ImGui.textDisabled("|");
+        if (ImGui.button("[] Stop", 60.0f, 24.0f)) {
+            if (motionPlayer != null) {
+                motionPlayer.stop();
+                motionPlayer.seek(0.0f, engine.getJoints());
+            }
+        }
+        if (ImGui.isItemHovered()) {
+            ImGui.setTooltip("Stop and Reset Motion to 0.00s");
+        }
+
+        ImGui.sameLine();
+        boolean loopVal = (motionPlayer != null && motionPlayer.isLooping());
+        ImBoolean loopBool = new ImBoolean(loopVal);
+        if (ImGui.checkbox("Loop", loopBool)) {
+            if (motionPlayer != null) {
+                motionPlayer.setLooping(loopBool.get());
+            }
+        }
+
+        if (hasSequence && motionPlayer.getSequence() != null) {
+            MotionSequence seq = motionPlayer.getSequence();
+            ImGui.sameLine();
+            float duration = Math.max(0.01f, seq.getDurationSeconds());
+            float curTime = motionPlayer.getCurrentTime();
+            ImFloat timeVal = new ImFloat(curTime);
+
+            ImGui.setNextItemWidth(90.0f);
+            if (ImGui.sliderFloat("##topTimeline", timeVal.getData(), 0.0f, duration, "%.1fs", ImGuiSliderFlags.None)) {
+                motionPlayer.seek(timeVal.get(), engine.getJoints());
+            }
+            if (ImGui.isItemHovered()) {
+                ImGui.setTooltip(String.format("Motion: %s (%.2fs / %.2fs)", seq.getName(), curTime, duration));
+            }
+        }
+
+        ImGui.sameLine(displayWidth - 225.0f);
+
+        long now = System.currentTimeMillis();
+        if (now - engine.getLastAutoSaveTime() < 2000) {
+            ImGui.textColored(0.4f, 0.85f, 0.4f, 1.0f, "Saved");
+            ImGui.sameLine();
+            ImGui.textDisabled("|");
+            ImGui.sameLine();
+        }
+
+        boolean bridgeActive = (bridgePanel != null && bridgePanel.isVisible());
+        if (bridgeActive) {
+            ImGui.pushStyleColor(ImGuiCol.Button, 0.2f, 0.65f, 0.55f, 1.0f);
+        }
+        if (ImGui.button("Sim2Real", 70.0f, 24.0f)) {
+            if (bridgePanel != null) {
+                bridgePanel.toggleVisible();
+            }
+        }
+        if (bridgeActive) {
+            ImGui.popStyleColor();
+        }
+        if (ImGui.isItemHovered()) {
+            ImGui.setTooltip("Sim-to-Real Hardware Bridge: Live ESP32/robot sync & telemetry");
+        }
+
         ImGui.sameLine();
 
         boolean aiActive = (aiPanel != null && aiPanel.isVisible());
         if (aiActive) {
-            ImGui.pushStyleColor(imgui.flag.ImGuiCol.Button, 0.2f, 0.55f, 0.85f, 1.0f);
+            ImGui.pushStyleColor(ImGuiCol.Button, 0.2f, 0.55f, 0.85f, 1.0f);
         }
         if (ImGui.button("AI", 45.0f, 24.0f)) {
             if (aiPanel != null) {
@@ -254,7 +319,7 @@ public class ToolbarPanel {
             ImGui.popStyleColor();
         }
         if (ImGui.isItemHovered()) {
-            ImGui.setTooltip("AI Assistant: Robot control and analysis panel");
+            ImGui.setTooltip("AI Assistant: Robot control & motion planning");
         }
 
         ImGui.end();

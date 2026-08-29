@@ -228,12 +228,12 @@ public class InspectorPanel {
                     float targetDeg = (float) Math.toDegrees(motor.getTargetAngleRadians());
 
                     ImGui.spacing();
-                    ImGui.text(String.format("Current: %.1f° | Target: %.1f°", currentDeg, targetDeg));
-                    ImGui.textDisabled(String.format("Speed: %.1f rad/s | Limits: [%.0f°, %.0f°]",
+                    ImGui.text(String.format("Current: %.1f deg | Target: %.1f deg", currentDeg, targetDeg));
+                    ImGui.textDisabled(String.format("Speed: %.1f rad/s | Limits: [%.0f deg, %.0f deg]",
                             motor.getMaxSpeedRadiansPerSecond(), minDeg, maxDeg));
 
                     ImGui.spacing();
-                    if (ImGui.button("Reset Angle (0°)", -1.0f, 26.0f)) {
+                    if (ImGui.button("Reset Angle (0 deg)", -1.0f, 26.0f)) {
                         motor.setTargetAngleRadians(0.0f);
                     }
                 }
