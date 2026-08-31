@@ -7,6 +7,8 @@ import org.lwjgl.glfw.GLFWVidMode;
 import org.lwjgl.opengl.GL;
 import org.lwjgl.system.MemoryStack;
 import rsim2.camera.Camera;
+import rsim2.collision.CollisionResult;
+import rsim2.collision.CollisionWorld;
 import rsim2.data.RobotDefinitionDTO;
 import rsim2.editor.Picker;
 import rsim2.editor.SelectionManager;
@@ -27,6 +29,7 @@ import java.nio.IntBuffer;
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 
 import static org.lwjgl.glfw.Callbacks.glfwFreeCallbacks;
@@ -55,6 +58,8 @@ public class Engine {
     private InspectorPanel inspectorPanel;
     private AIPanel aiPanel;
     private BridgePanel bridgePanel;
+    private CollisionPanel collisionPanel;
+    private CollisionWorld collisionWorld;
     private MotionPlayer motionPlayer;
 
     private SceneNode rootNode;
@@ -166,10 +171,12 @@ public class Engine {
         joints = new ArrayList<>();
         currentProjectPath = null;
         motionPlayer = new MotionPlayer();
+        collisionWorld = new CollisionWorld();
 
+        collisionPanel = new CollisionPanel(this, rootNode, joints, selectionManager, collisionWorld);
         aiPanel = new AIPanel(this, rootNode, selectionManager, joints, motionPlayer);
         bridgePanel = new BridgePanel(motionPlayer);
-        toolbarPanel = new ToolbarPanel(this, rootNode, selectionManager, commandHistory, aiPanel, bridgePanel);
+        toolbarPanel = new ToolbarPanel(this, rootNode, selectionManager, commandHistory, aiPanel, bridgePanel, collisionPanel);
         hierarchyPanel = new HierarchyPanel(rootNode, selectionManager);
         allJointsPanel = new AllJointsPanel(this, rootNode, joints, commandHistory);
         inspectorPanel = new InspectorPanel(this, rootNode, selectionManager, joints, commandHistory);
@@ -216,6 +223,10 @@ public class Engine {
                 inspectorPanel.setRootNode(this.rootNode);
                 inspectorPanel.setJoints(this.joints);
                 inspectorPanel.setCommandHistory(this.commandHistory);
+            }
+            if (collisionPanel != null) {
+                collisionPanel.setRootNode(this.rootNode);
+                collisionPanel.setJoints(this.joints);
             }
             if (motionPlayer != null) {
                 motionPlayer.stop();
@@ -276,6 +287,10 @@ public class Engine {
                 inspectorPanel.setJoints(this.joints);
                 inspectorPanel.setCommandHistory(this.commandHistory);
             }
+            if (collisionPanel != null) {
+                collisionPanel.setRootNode(this.rootNode);
+                collisionPanel.setJoints(this.joints);
+            }
             if (motionPlayer != null) {
                 motionPlayer.stop();
             }
@@ -324,6 +339,14 @@ public class Engine {
 
     public BridgePanel getBridgePanel() {
         return bridgePanel;
+    }
+
+    public CollisionWorld getCollisionWorld() {
+        return collisionWorld;
+    }
+
+    public CollisionPanel getCollisionPanel() {
+        return collisionPanel;
     }
 
     public List<Joint> getJoints() {
@@ -399,6 +422,15 @@ public class Engine {
                     }
                 }
                 rsim2.bridge.BridgeManager.getInstance().streamCurrentJointStates(joints, 0.0f);
+            }
+
+            if (collisionWorld != null) {
+                collisionWorld.update(rootNode, joints);
+                if (collisionPanel != null && collisionPanel.isStopOnCollision()) {
+                    rsim2.bridge.BridgeManager.getInstance().getSafetyFilter().setCollisionStopActive(
+                            collisionWorld.getLastResult().hasCollision()
+                    );
+                }
             }
 
             SceneNode gizmoTarget = (selectionManager != null) ? selectionManager.getSelected() : null;
@@ -484,7 +516,10 @@ public class Engine {
                 camera.update(input, deltaTime);
             }
 
-            renderer.render(camera, rootNode);
+            Set<SceneNode> collidingNodes = (collisionWorld != null) ? collisionWorld.getLastResult().getCollidingNodes() : null;
+            Map<SceneNode, rsim2.collision.OBB> debugOBBs = (collisionWorld != null && collisionWorld.isDebugWireframesEnabled())
+                    ? collisionWorld.getWorldOBBs() : null;
+            renderer.render(camera, rootNode, (selectionManager != null) ? selectionManager.getSelected() : null, collidingNodes, debugOBBs);
 
             if (translateGizmo != null) {
                 translateGizmo.render(camera, width, height);
@@ -507,6 +542,9 @@ public class Engine {
             }
             if (bridgePanel != null) {
                 bridgePanel.render();
+            }
+            if (collisionPanel != null) {
+                collisionPanel.render();
             }
 
             imguiLayer.render();

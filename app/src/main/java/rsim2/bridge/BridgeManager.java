@@ -17,8 +17,13 @@ public class BridgeManager {
 
     private boolean liveSyncEnabled = false;
     private int targetPublishRateHz = 50;
-    private long minPublishIntervalMs = 20;
-    private long lastPublishTimeMs = 0;
+    private long minPublishIntervalNanos = 20_000_000L;
+    private long lastPublishTimeNanos = 0;
+
+    private final Map<String, Float> reusableDegreesMap = new HashMap<>();
+
+    private long ppsWindowStartNanos = 0;
+    private int ppsPacketCount = 0;
 
     private BridgeManager() {
         UdpBridge udp = new UdpBridge();
@@ -67,7 +72,7 @@ public class BridgeManager {
 
     public void setTargetPublishRateHz(int rateHz) {
         this.targetPublishRateHz = Math.max(1, Math.min(200, rateHz));
-        this.minPublishIntervalMs = 1000 / this.targetPublishRateHz;
+        this.minPublishIntervalNanos = (long) (1_000_000_000.0 / this.targetPublishRateHz);
     }
 
     public synchronized void streamJointPositions(Map<String, Float> rawAnglesDegrees, float timestamp, List<Joint> joints) {
@@ -79,27 +84,29 @@ public class BridgeManager {
             return;
         }
 
-        long now = System.currentTimeMillis();
-        if (now - lastPublishTimeMs < minPublishIntervalMs) {
+        long now = System.nanoTime();
+        if (lastPublishTimeNanos != 0 && (now - lastPublishTimeNanos) < minPublishIntervalNanos) {
             return;
         }
-        lastPublishTimeMs = now;
+        lastPublishTimeNanos = now;
 
         Map<String, Float> safeAngles = safetyFilter.processAndFilter(rawAnglesDegrees, joints);
 
         activeBridge.sendJointPositions(safeAngles, timestamp);
+
+        updatePacketsPerSecond(now);
     }
 
     public synchronized void streamCurrentJointStates(List<Joint> joints, float timestamp) {
         if (joints == null || !liveSyncEnabled) return;
 
-        Map<String, Float> degreesMap = new HashMap<>();
+        reusableDegreesMap.clear();
         for (Joint j : joints) {
             if (j != null && j.getId() != null) {
-                degreesMap.put(j.getId(), (float) Math.toDegrees(j.getCurrentAngleRadians()));
+                reusableDegreesMap.put(j.getId(), (float) Math.toDegrees(j.getCurrentAngleRadians()));
             }
         }
-        streamJointPositions(degreesMap, timestamp, joints);
+        streamJointPositions(reusableDegreesMap, timestamp, joints);
     }
 
     public synchronized void triggerEmergencyStop() {
@@ -111,5 +118,22 @@ public class BridgeManager {
 
     public synchronized void resetEmergencyStop() {
         safetyFilter.resetEmergencyStop();
+    }
+
+    private void updatePacketsPerSecond(long nowNanos) {
+        ppsPacketCount++;
+        if (ppsWindowStartNanos == 0) {
+            ppsWindowStartNanos = nowNanos;
+        }
+
+        long elapsed = nowNanos - ppsWindowStartNanos;
+        if (elapsed >= 1_000_000_000L) {
+            float pps = ppsPacketCount / (elapsed / 1_000_000_000.0f);
+            if (activeBridge != null) {
+                activeBridge.getStats().updateRate(pps);
+            }
+            ppsPacketCount = 0;
+            ppsWindowStartNanos = nowNanos;
+        }
     }
 }

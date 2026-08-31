@@ -29,11 +29,20 @@ public class Renderer {
     private int modelViewLocation;
     private int modelModelLocation;
     private int modelIsSelectedLocation;
+    private int modelIsCollidingLocation;
     private int modelCameraPosLocation;
+
+    private ShaderProgram wireframeShaderProgram;
+    private int wireframeVao, wireframeVbo;
+    private int wireframeProjectionLocation;
+    private int wireframeViewLocation;
+    private int wireframeModelLocation;
+    private int wireframeColorLocation;
 
     private Mesh testMesh;
     
     private final Matrix4f modelMatrix = new Matrix4f();
+    private final Matrix4f obbMatrix = new Matrix4f();
     
     private final float[] gridVertices = {
         -100.0f, 0.0f, -100.0f,
@@ -47,9 +56,53 @@ public class Renderer {
         2, 3, 0
     };
 
+    private final float[] unitCubeWireframeVertices = {
+        -1, -1, -1,   1, -1, -1,
+         1, -1, -1,   1, -1,  1,
+         1, -1,  1,  -1, -1,  1,
+        -1, -1,  1,  -1, -1, -1,
+        -1,  1, -1,   1,  1, -1,
+         1,  1, -1,   1,  1,  1,
+         1,  1,  1,  -1,  1,  1,
+        -1,  1,  1,  -1,  1, -1,
+        -1, -1, -1,  -1,  1, -1,
+         1, -1, -1,   1,  1, -1,
+         1, -1,  1,   1,  1,  1,
+        -1, -1,  1,  -1,  1,  1
+    };
+
     public void init() throws Exception {
         setupGrid();
         setupModelPipeline();
+        setupWireframePipeline();
+    }
+
+    private void setupWireframePipeline() throws Exception {
+        wireframeShaderProgram = new ShaderProgram();
+        wireframeShaderProgram.createVertexShader("/shaders/gizmo.vert");
+        wireframeShaderProgram.createFragmentShader("/shaders/gizmo.frag");
+        wireframeShaderProgram.link();
+
+        wireframeProjectionLocation = wireframeShaderProgram.getUniformLocation("projectionMatrix");
+        wireframeViewLocation = wireframeShaderProgram.getUniformLocation("viewMatrix");
+        wireframeModelLocation = wireframeShaderProgram.getUniformLocation("modelMatrix");
+        wireframeColorLocation = wireframeShaderProgram.getUniformLocation("color");
+
+        wireframeVao = glGenVertexArrays();
+        glBindVertexArray(wireframeVao);
+
+        FloatBuffer cubeBuf = BufferUtils.createFloatBuffer(unitCubeWireframeVertices.length);
+        cubeBuf.put(unitCubeWireframeVertices).flip();
+
+        wireframeVbo = glGenBuffers();
+        glBindBuffer(GL_ARRAY_BUFFER, wireframeVbo);
+        glBufferData(GL_ARRAY_BUFFER, cubeBuf, GL_STATIC_DRAW);
+
+        glVertexAttribPointer(0, 3, GL_FLOAT, false, 3 * Float.BYTES, 0);
+        glEnableVertexAttribArray(0);
+
+        glBindBuffer(GL_ARRAY_BUFFER, 0);
+        glBindVertexArray(0);
     }
 
     private void setupGrid() throws Exception {
@@ -96,16 +149,23 @@ public class Renderer {
         modelViewLocation = modelShaderProgram.getUniformLocation("viewMatrix");
         modelModelLocation = modelShaderProgram.getUniformLocation("modelMatrix");
         modelIsSelectedLocation = modelShaderProgram.getUniformLocation("isSelected");
+        modelIsCollidingLocation = modelShaderProgram.getUniformLocation("isColliding");
         modelCameraPosLocation = modelShaderProgram.getUniformLocation("cameraPos");
 
         testMesh = ObjLoader.load("/models/test.obj");
     }
 
     public void render(Camera camera, SceneNode rootNode) {
-        render(camera, rootNode, null);
+        render(camera, rootNode, null, null, null);
     }
 
     public void render(Camera camera, SceneNode rootNode, SceneNode selectedNode) {
+        render(camera, rootNode, selectedNode, null, null);
+    }
+
+    public void render(Camera camera, SceneNode rootNode, SceneNode selectedNode,
+                       java.util.Set<SceneNode> collidingNodes,
+                       java.util.Map<SceneNode, rsim2.collision.OBB> debugOBBs) {
         renderGrid(camera);
 
         if (rootNode != null) {
@@ -124,13 +184,17 @@ public class Renderer {
                 glUniform3f(modelCameraPosLocation, camPos.x, camPos.y, camPos.z);
             }
 
-            renderNode(rootNode, selectedNode);
+            renderNode(rootNode, selectedNode, collidingNodes);
 
             modelShaderProgram.unbind();
         }
+
+        if (debugOBBs != null && !debugOBBs.isEmpty()) {
+            renderDebugWireframes(camera, selectedNode, collidingNodes, debugOBBs);
+        }
     }
 
-    private void renderNode(SceneNode node, SceneNode selectedNode) {
+    private void renderNode(SceneNode node, SceneNode selectedNode, java.util.Set<SceneNode> collidingNodes) {
         if (!node.getMeshes().isEmpty()) {
             FloatBuffer modelBuffer = BufferUtils.createFloatBuffer(16);
             node.getWorldTransform().get(modelBuffer);
@@ -141,6 +205,11 @@ public class Renderer {
                 glUniform1i(modelIsSelectedLocation, isSel ? 1 : 0);
             }
 
+            boolean isColliding = (collidingNodes != null && collidingNodes.contains(node));
+            if (modelIsCollidingLocation >= 0) {
+                glUniform1i(modelIsCollidingLocation, isColliding ? 1 : 0);
+            }
+
             for (Mesh mesh : node.getMeshes()) {
                 if (mesh != null) {
                     mesh.render();
@@ -149,8 +218,66 @@ public class Renderer {
         }
 
         for (SceneNode child : node.getChildren()) {
-            renderNode(child, selectedNode);
+            renderNode(child, selectedNode, collidingNodes);
         }
+    }
+
+    private void renderDebugWireframes(Camera camera, SceneNode selectedNode,
+                                       java.util.Set<SceneNode> collidingNodes,
+                                       java.util.Map<SceneNode, rsim2.collision.OBB> debugOBBs) {
+        if (wireframeShaderProgram == null || debugOBBs == null || debugOBBs.isEmpty()) return;
+
+        wireframeShaderProgram.bind();
+
+        FloatBuffer projectionBuffer = BufferUtils.createFloatBuffer(16);
+        camera.getProjectionMatrix().get(projectionBuffer);
+        glUniformMatrix4fv(wireframeProjectionLocation, false, projectionBuffer);
+
+        FloatBuffer viewBuffer = BufferUtils.createFloatBuffer(16);
+        camera.getViewMatrix().get(viewBuffer);
+        glUniformMatrix4fv(wireframeViewLocation, false, viewBuffer);
+
+        glBindVertexArray(wireframeVao);
+
+        FloatBuffer matBuf = BufferUtils.createFloatBuffer(16);
+
+        for (java.util.Map.Entry<SceneNode, rsim2.collision.OBB> entry : debugOBBs.entrySet()) {
+            SceneNode node = entry.getKey();
+            rsim2.collision.OBB obb = entry.getValue();
+            if (obb == null) continue;
+
+            boolean isColliding = (collidingNodes != null && collidingNodes.contains(node));
+            boolean isSel = (node == selectedNode);
+
+            if (isColliding) {
+                glUniform4f(wireframeColorLocation, 1.0f, 0.2f, 0.2f, 0.95f);
+            } else if (isSel) {
+                glUniform4f(wireframeColorLocation, 0.2f, 0.85f, 1.0f, 0.90f);
+            } else {
+                glUniform4f(wireframeColorLocation, 0.25f, 0.85f, 0.35f, 0.65f);
+            }
+
+            Vector3f c = obb.getCenter();
+            Vector3f[] u = obb.getAxes();
+            Vector3f e = obb.getHalfExtents();
+
+            obbMatrix.identity();
+            obbMatrix.set(
+                    u[0].x * e.x, u[0].y * e.x, u[0].z * e.x, 0.0f,
+                    u[1].x * e.y, u[1].y * e.y, u[1].z * e.y, 0.0f,
+                    u[2].x * e.z, u[2].y * e.z, u[2].z * e.z, 0.0f,
+                    c.x, c.y, c.z, 1.0f
+            );
+
+            matBuf.clear();
+            obbMatrix.get(matBuf);
+            glUniformMatrix4fv(wireframeModelLocation, false, matBuf);
+
+            glDrawArrays(GL_LINES, 0, 24);
+        }
+
+        glBindVertexArray(0);
+        wireframeShaderProgram.unbind();
     }
 
     private void renderGrid(Camera camera) {
@@ -187,6 +314,9 @@ public class Renderer {
         if (modelShaderProgram != null) {
             modelShaderProgram.cleanup();
         }
+        if (wireframeShaderProgram != null) {
+            wireframeShaderProgram.cleanup();
+        }
         if (testMesh != null) {
             testMesh.cleanup();
         }
@@ -194,5 +324,7 @@ public class Renderer {
         if (gridVao != 0) glDeleteVertexArrays(gridVao);
         if (gridVbo != 0) glDeleteBuffers(gridVbo);
         if (gridEbo != 0) glDeleteBuffers(gridEbo);
+        if (wireframeVao != 0) glDeleteVertexArrays(wireframeVao);
+        if (wireframeVbo != 0) glDeleteBuffers(wireframeVbo);
     }
 }

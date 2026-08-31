@@ -36,7 +36,6 @@ public class BridgePanel {
     private final ImInt portInput = new ImInt(8888);
     private final ImInt selectedProtocolIdx = new ImInt(0);
     private final ImInt publishRateHz = new ImInt(50);
-    private final ImFloat maxDegreesDelta = new ImFloat(45.0f);
     private final ImBoolean enforceServo0To180 = new ImBoolean(false);
     private final ImBoolean liveSyncToggle = new ImBoolean(false);
 
@@ -173,9 +172,12 @@ public class BridgePanel {
 
         SafetyFilter safety = bridgeManager.getSafetyFilter();
 
-        maxDegreesDelta.set(safety.getMaxDegreesPerStep());
-        if (ImGui.sliderFloat("Max Delta / Step (Deg)", maxDegreesDelta.getData(), 1.0f, 90.0f)) {
-            safety.setMaxDegreesPerStep(maxDegreesDelta.get());
+        ImFloat maxDegPerSec = new ImFloat(safety.getMaxDegreesPerSecond());
+        if (ImGui.sliderFloat("Max Velocity (Deg/s)", maxDegPerSec.getData(), 10.0f, 720.0f)) {
+            safety.setMaxDegreesPerSecond(maxDegPerSec.get());
+        }
+        if (ImGui.isItemHovered()) {
+            ImGui.setTooltip("Maximum angular velocity in degrees per second.\nThis is time-based and independent of publish rate.");
         }
 
         enforceServo0To180.set(safety.isEnforceServo0To180());

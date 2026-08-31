@@ -33,20 +33,31 @@ public class ToolbarPanel {
     private int importTypePending = 0;
     private final AIPanel aiPanel;
     private BridgePanel bridgePanel;
+    private CollisionPanel collisionPanel;
 
     public ToolbarPanel(Engine engine, SceneNode rootNode, SelectionManager selectionManager,
             CommandHistory commandHistory, AIPanel aiPanel) {
-        this(engine, rootNode, selectionManager, commandHistory, aiPanel, null);
+        this(engine, rootNode, selectionManager, commandHistory, aiPanel, null, null);
     }
 
     public ToolbarPanel(Engine engine, SceneNode rootNode, SelectionManager selectionManager,
             CommandHistory commandHistory, AIPanel aiPanel, BridgePanel bridgePanel) {
+        this(engine, rootNode, selectionManager, commandHistory, aiPanel, bridgePanel, null);
+    }
+
+    public ToolbarPanel(Engine engine, SceneNode rootNode, SelectionManager selectionManager,
+            CommandHistory commandHistory, AIPanel aiPanel, BridgePanel bridgePanel, CollisionPanel collisionPanel) {
         this.engine = engine;
         this.rootNode = rootNode;
         this.selectionManager = selectionManager;
         this.commandHistory = commandHistory;
         this.aiPanel = aiPanel;
         this.bridgePanel = bridgePanel;
+        this.collisionPanel = collisionPanel;
+    }
+
+    public void setCollisionPanel(CollisionPanel collisionPanel) {
+        this.collisionPanel = collisionPanel;
     }
 
     public void setBridgePanel(BridgePanel bridgePanel) {
@@ -278,7 +289,7 @@ public class ToolbarPanel {
             }
         }
 
-        ImGui.sameLine(displayWidth - 225.0f);
+        ImGui.sameLine(displayWidth - 335.0f);
 
         long now = System.currentTimeMillis();
         if (now - engine.getLastAutoSaveTime() < 2000) {
@@ -287,6 +298,33 @@ public class ToolbarPanel {
             ImGui.textDisabled("|");
             ImGui.sameLine();
         }
+
+        boolean collisionActive = (collisionPanel != null && collisionPanel.isVisible());
+        boolean hasCollisions = (engine.getCollisionWorld() != null && engine.getCollisionWorld().getLastResult().hasCollision());
+        int colCount = hasCollisions ? engine.getCollisionWorld().getLastResult().getCollisionCount() : 0;
+
+        if (hasCollisions) {
+            ImGui.pushStyleColor(ImGuiCol.Button, 0.85f, 0.22f, 0.22f, 1.0f);
+            ImGui.pushStyleColor(ImGuiCol.ButtonHovered, 0.95f, 0.35f, 0.35f, 1.0f);
+        } else if (collisionActive) {
+            ImGui.pushStyleColor(ImGuiCol.Button, 0.3f, 0.6f, 0.75f, 1.0f);
+            ImGui.pushStyleColor(ImGuiCol.ButtonHovered, 0.4f, 0.7f, 0.85f, 1.0f);
+        }
+        String colBtnLabel = hasCollisions ? "Col (" + colCount + ")" : "Collision";
+        if (ImGui.button(colBtnLabel, 80.0f, 24.0f)) {
+            if (collisionPanel != null) {
+                collisionPanel.toggleVisible();
+            }
+        }
+        if (hasCollisions || collisionActive) {
+            ImGui.popStyleColor(2);
+        }
+        if (ImGui.isItemHovered()) {
+            ImGui.setTooltip(hasCollisions ? "Collision Alert! " + colCount + " contact(s) detected. Click to view."
+                                           : "Collision Detection System: Self-collision & ground contact");
+        }
+
+        ImGui.sameLine();
 
         boolean bridgeActive = (bridgePanel != null && bridgePanel.isVisible());
         if (bridgeActive) {

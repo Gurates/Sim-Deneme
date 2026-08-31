@@ -41,7 +41,7 @@ public class TrajectoryExporter {
 
         sb.append("#define TRAJECTORY_FRAMES ").append(totalFrames).append("\n");
         sb.append("#define TRAJECTORY_JOINTS ").append(jointNames.size()).append("\n");
-        sb.append("#define TRAJECTORY_DT_MS ").append((int) (dt * 1000)).append("\n\n");
+        sb.append("#define TRAJECTORY_DT_MS ").append(Math.round(dt * 1000)).append("\n\n");
 
         sb.append("// Joint Index Mapping:\n");
         for (int i = 0; i < jointNames.size(); i++) {
@@ -116,7 +116,8 @@ public class TrajectoryExporter {
             if (parent != null && !parent.exists()) {
                 parent.mkdirs();
             }
-            try (FileWriter writer = new FileWriter(file)) {
+            try (java.io.OutputStreamWriter writer = new java.io.OutputStreamWriter(
+                    new java.io.FileOutputStream(file), java.nio.charset.StandardCharsets.UTF_8)) {
                 writer.write(content);
             }
             return true;

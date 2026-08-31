@@ -45,6 +45,10 @@ public class MotionSequence {
         return keyframes;
     }
 
+    public boolean hasKeyframes() {
+        return !keyframes.isEmpty();
+    }
+
     public void addKeyframe(Keyframe keyframe) {
         if (keyframe != null) {
             keyframes.add(keyframe);

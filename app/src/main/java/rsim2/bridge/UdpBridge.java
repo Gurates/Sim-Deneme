@@ -19,6 +19,12 @@ public class UdpBridge implements RobotBridge {
     private boolean connected = false;
     private String targetHost = "192.168.1.50";
 
+    private long sequenceNumber = 0;
+
+    private static final int ESTOP_BURST_COUNT = 5;
+
+    private byte[] sendBuffer = new byte[2048];
+
     @Override
     public String getName() {
         return "UDP Socket (ESP32 / Wi-Fi / Ethernet)";
@@ -32,7 +38,9 @@ public class UdpBridge implements RobotBridge {
             this.targetPort = port > 0 ? port : 8888;
             this.targetAddress = InetAddress.getByName(this.targetHost);
             this.socket = new DatagramSocket();
+            this.socket.setSoTimeout(1000);
             this.connected = true;
+            this.sequenceNumber = 0;
             this.stats.reset();
             return true;
         } catch (Exception e) {
@@ -63,6 +71,7 @@ public class UdpBridge implements RobotBridge {
         try {
             JsonObject json = new JsonObject();
             json.addProperty("type", "cmd");
+            json.addProperty("seq", sequenceNumber++);
             json.addProperty("t", timestampSeconds);
 
             JsonObject jointsObj = new JsonObject();
@@ -73,13 +82,9 @@ public class UdpBridge implements RobotBridge {
             }
             json.add("joints", jointsObj);
 
-            byte[] data = (gson.toJson(json) + "\n").getBytes(StandardCharsets.UTF_8);
-            DatagramPacket packet = new DatagramPacket(data, data.length, targetAddress, targetPort);
-            socket.send(packet);
-
-            stats.recordPacketSent(data.length);
+            sendPacket(gson.toJson(json));
         } catch (Exception e) {
-            stats.recordError("UDP Send Error: " + e.getMessage());
+            handleSendError("UDP Send Error: " + e.getMessage());
         }
     }
 
@@ -87,18 +92,35 @@ public class UdpBridge implements RobotBridge {
     public synchronized void sendEmergencyStop() {
         if (!isConnected()) return;
 
-        try {
-            JsonObject json = new JsonObject();
-            json.addProperty("type", "estop");
-            json.addProperty("msg", "EMERGENCY_STOP");
+        for (int i = 0; i < ESTOP_BURST_COUNT; i++) {
+            try {
+                JsonObject json = new JsonObject();
+                json.addProperty("type", "estop");
+                json.addProperty("seq", sequenceNumber++);
+                json.addProperty("msg", "EMERGENCY_STOP");
 
-            byte[] data = (gson.toJson(json) + "\n").getBytes(StandardCharsets.UTF_8);
-            DatagramPacket packet = new DatagramPacket(data, data.length, targetAddress, targetPort);
-            socket.send(packet);
+                sendPacket(gson.toJson(json));
 
-            stats.recordPacketSent(data.length);
-        } catch (Exception e) {
-            stats.recordError("UDP E-Stop Send Error: " + e.getMessage());
+                if (i < ESTOP_BURST_COUNT - 1) {
+                    Thread.sleep(5);
+                }
+            } catch (Exception e) {
+                stats.recordError("UDP E-Stop Send Error: " + e.getMessage());
+            }
+        }
+    }
+
+    private void sendPacket(String jsonString) throws Exception {
+        byte[] data = (jsonString + "\n").getBytes(StandardCharsets.UTF_8);
+        DatagramPacket packet = new DatagramPacket(data, data.length, targetAddress, targetPort);
+        socket.send(packet);
+        stats.recordPacketSent(data.length);
+    }
+
+    private void handleSendError(String errorMsg) {
+        stats.recordError(errorMsg);
+        if (stats.getErrorCount() > 10) {
+            connected = false;
         }
     }
 

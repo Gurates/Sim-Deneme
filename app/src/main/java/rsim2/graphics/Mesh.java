@@ -2,6 +2,7 @@ package rsim2.graphics;
 
 import org.joml.Vector3f;
 import org.lwjgl.BufferUtils;
+import org.lwjgl.opengl.GL;
 
 import java.nio.FloatBuffer;
 import java.nio.IntBuffer;
@@ -49,48 +50,53 @@ public class Mesh {
             }
         }
 
-        vao = glGenVertexArrays();
-        glBindVertexArray(vao);
+        int vaoId = 0, vboPosId = 0, vboNormId = 0, eboId = 0;
+        try {
+            if (GL.getCapabilities() != null) {
+                vaoId = glGenVertexArrays();
+                glBindVertexArray(vaoId);
 
-        if (vertices != null && vertices.length > 0) {
-            FloatBuffer posBuffer = BufferUtils.createFloatBuffer(vertices.length);
-            posBuffer.put(vertices).flip();
+                if (vertices != null && vertices.length > 0) {
+                    FloatBuffer posBuffer = BufferUtils.createFloatBuffer(vertices.length);
+                    posBuffer.put(vertices).flip();
 
-            vboPositions = glGenBuffers();
-            glBindBuffer(GL_ARRAY_BUFFER, vboPositions);
-            glBufferData(GL_ARRAY_BUFFER, posBuffer, GL_STATIC_DRAW);
-            glVertexAttribPointer(0, 3, GL_FLOAT, false, 0, 0);
-            glEnableVertexAttribArray(0);
-        } else {
-            vboPositions = 0;
+                    vboPosId = glGenBuffers();
+                    glBindBuffer(GL_ARRAY_BUFFER, vboPosId);
+                    glBufferData(GL_ARRAY_BUFFER, posBuffer, GL_STATIC_DRAW);
+                    glVertexAttribPointer(0, 3, GL_FLOAT, false, 0, 0);
+                    glEnableVertexAttribArray(0);
+                }
+
+                if (normals != null && normals.length > 0) {
+                    FloatBuffer normBuffer = BufferUtils.createFloatBuffer(normals.length);
+                    normBuffer.put(normals).flip();
+
+                    vboNormId = glGenBuffers();
+                    glBindBuffer(GL_ARRAY_BUFFER, vboNormId);
+                    glBufferData(GL_ARRAY_BUFFER, normBuffer, GL_STATIC_DRAW);
+                    glVertexAttribPointer(1, 3, GL_FLOAT, false, 0, 0);
+                    glEnableVertexAttribArray(1);
+                }
+
+                if (indices != null && indices.length > 0) {
+                    IntBuffer idxBuffer = BufferUtils.createIntBuffer(indices.length);
+                    idxBuffer.put(indices).flip();
+
+                    eboId = glGenBuffers();
+                    glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, eboId);
+                    glBufferData(GL_ELEMENT_ARRAY_BUFFER, idxBuffer, GL_STATIC_DRAW);
+                }
+
+                glBindBuffer(GL_ARRAY_BUFFER, 0);
+                glBindVertexArray(0);
+            }
+        } catch (Throwable ignored) {
         }
 
-        if (normals != null && normals.length > 0) {
-            FloatBuffer normBuffer = BufferUtils.createFloatBuffer(normals.length);
-            normBuffer.put(normals).flip();
-
-            vboNormals = glGenBuffers();
-            glBindBuffer(GL_ARRAY_BUFFER, vboNormals);
-            glBufferData(GL_ARRAY_BUFFER, normBuffer, GL_STATIC_DRAW);
-            glVertexAttribPointer(1, 3, GL_FLOAT, false, 0, 0);
-            glEnableVertexAttribArray(1);
-        } else {
-            vboNormals = 0;
-        }
-
-        if (indices != null && indices.length > 0) {
-            IntBuffer idxBuffer = BufferUtils.createIntBuffer(indices.length);
-            idxBuffer.put(indices).flip();
-
-            ebo = glGenBuffers();
-            glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, ebo);
-            glBufferData(GL_ELEMENT_ARRAY_BUFFER, idxBuffer, GL_STATIC_DRAW);
-        } else {
-            ebo = 0;
-        }
-
-        glBindBuffer(GL_ARRAY_BUFFER, 0);
-        glBindVertexArray(0);
+        this.vao = vaoId;
+        this.vboPositions = vboPosId;
+        this.vboNormals = vboNormId;
+        this.ebo = eboId;
     }
 
     public static Mesh createScaled(Mesh original, Vector3f scale) {
@@ -117,9 +123,14 @@ public class Mesh {
     }
 
     public void render() {
-        glBindVertexArray(vao);
-        glDrawElements(GL_TRIANGLES, vertexCount, GL_UNSIGNED_INT, 0);
-        glBindVertexArray(0);
+        try {
+            if (vao != 0 && GL.getCapabilities() != null) {
+                glBindVertexArray(vao);
+                glDrawElements(GL_TRIANGLES, vertexCount, GL_UNSIGNED_INT, 0);
+                glBindVertexArray(0);
+            }
+        } catch (Throwable ignored) {
+        }
     }
 
     public float[] getVertices() {
@@ -159,10 +170,15 @@ public class Mesh {
     }
 
     public void cleanup() {
-        glBindVertexArray(0);
-        if (vao != 0) glDeleteVertexArrays(vao);
-        if (vboPositions != 0) glDeleteBuffers(vboPositions);
-        if (vboNormals != 0) glDeleteBuffers(vboNormals);
-        if (ebo != 0) glDeleteBuffers(ebo);
+        try {
+            if (GL.getCapabilities() != null) {
+                glBindVertexArray(0);
+                if (vao != 0) glDeleteVertexArrays(vao);
+                if (vboPositions != 0) glDeleteBuffers(vboPositions);
+                if (vboNormals != 0) glDeleteBuffers(vboNormals);
+                if (ebo != 0) glDeleteBuffers(ebo);
+            }
+        } catch (Throwable ignored) {
+        }
     }
 }

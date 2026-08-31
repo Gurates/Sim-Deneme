@@ -71,10 +71,22 @@ tasks.named('run') {
     workingDir = rootProject.projectDir
 }
 
+test {
+    useJUnitPlatform()
+}
+
 tasks.register('testSimToReal', JavaExec) {
     group = 'verification'
     description = 'Runs the SimToRealBridgeTest suite'
     classpath = sourceSets.test.runtimeClasspath
     mainClass = 'rsim2.SimToRealBridgeTest'
+    workingDir = rootProject.projectDir
+}
+
+tasks.register('testCollision', JavaExec) {
+    group = 'verification'
+    description = 'Runs the CollisionDetectionTest suite'
+    classpath = sourceSets.test.runtimeClasspath
+    mainClass = 'rsim2.CollisionDetectionTest'
     workingDir = rootProject.projectDir
 }
