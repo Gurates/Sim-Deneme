@@ -1,10 +1,13 @@
 package rsim2.io;
 
+import org.joml.Matrix4f;
+import org.joml.Quaternionf;
 import org.joml.Vector3f;
 import org.w3c.dom.Document;
 import org.w3c.dom.Element;
 import org.w3c.dom.Node;
 import org.w3c.dom.NodeList;
+import rsim2.collision.*;
 import rsim2.graphics.Mesh;
 import rsim2.scene.Joint;
 import rsim2.scene.JointType;
@@ -24,6 +27,7 @@ public class UrdfLoader {
         public SceneNode rootNode;
         public List<Joint> joints = new ArrayList<>();
         public Map<String, SceneNode> linksById = new HashMap<>();
+        public List<String[]> disabledCollisionPairs = new ArrayList<>();
     }
 
     public static UrdfResult load(String urdfFilePath) throws Exception {
@@ -133,7 +137,24 @@ public class UrdfLoader {
                 sceneNode.setSourceMeshPath(meshes.get(0).getSourcePath());
             }
 
+            CompoundShape compoundShape = parseCollisionShapes(linkElem, baseDir, meshes);
+            if (compoundShape != null && !compoundShape.isEmpty()) {
+                sceneNode.setCollisionShape(compoundShape);
+            }
+
             result.linksById.put(linkName, sceneNode);
+        }
+
+        NodeList disableNodes = rootElem.getElementsByTagName("disable_collisions");
+        for (int i = 0; i < disableNodes.getLength(); i++) {
+            Node dNode = disableNodes.item(i);
+            if (dNode.getNodeType() != Node.ELEMENT_NODE) continue;
+            Element disElem = (Element) dNode;
+            String link1 = disElem.getAttribute("link1");
+            String link2 = disElem.getAttribute("link2");
+            if (link1 != null && link2 != null && !link1.trim().isEmpty() && !link2.trim().isEmpty()) {
+                result.disabledCollisionPairs.add(new String[]{link1.trim(), link2.trim()});
+            }
         }
 
         NodeList jointNodes = rootElem.getElementsByTagName("joint");
@@ -279,6 +300,123 @@ public class UrdfLoader {
             }
         }
         return res;
+    }
+
+    private static float parseSingleFloat(String str, float defaultValue) {
+        if (str == null || str.trim().isEmpty()) return defaultValue;
+        try {
+            return Float.parseFloat(str.trim());
+        } catch (Exception e) {
+            return defaultValue;
+        }
+    }
+
+    private static CompoundShape parseCollisionShapes(Element linkElem, File baseDir, List<Mesh> fallbackVisualMeshes) {
+        CompoundShape compound = new CompoundShape();
+        if (linkElem == null) return compound;
+
+        NodeList collisionNodes = linkElem.getElementsByTagName("collision");
+        for (int c = 0; c < collisionNodes.getLength(); c++) {
+            Node cNode = collisionNodes.item(c);
+            if (cNode.getNodeType() != Node.ELEMENT_NODE) continue;
+            Element colElem = (Element) cNode;
+
+            Matrix4f localTransform = new Matrix4f();
+            NodeList originNodes = colElem.getElementsByTagName("origin");
+            if (originNodes.getLength() > 0) {
+                Element originElem = (Element) originNodes.item(0);
+                String xyzStr = originElem.getAttribute("xyz");
+                String rpyStr = originElem.getAttribute("rpy");
+                Vector3f pos = new Vector3f(0, 0, 0);
+                if (xyzStr != null && !xyzStr.trim().isEmpty()) {
+                    float[] xyz = parseFloats(xyzStr, 3);
+                    pos.set(xyz[0], xyz[1], xyz[2]);
+                }
+                if (rpyStr != null && !rpyStr.trim().isEmpty()) {
+                    float[] rpy = parseFloats(rpyStr, 3);
+                    Quaternionf rot = new Quaternionf().rotationXYZ(rpy[0], rpy[1], rpy[2]);
+                    localTransform.translationRotate(pos, rot);
+                } else {
+                    localTransform.translation(pos);
+                }
+            }
+
+            NodeList geomNodes = colElem.getElementsByTagName("geometry");
+            if (geomNodes.getLength() > 0) {
+                Element geomElem = (Element) geomNodes.item(0);
+
+                NodeList boxNodes = geomElem.getElementsByTagName("box");
+                if (boxNodes.getLength() > 0) {
+                    Element boxElem = (Element) boxNodes.item(0);
+                    String sizeStr = boxElem.getAttribute("size");
+                    if (sizeStr != null && !sizeStr.trim().isEmpty()) {
+                        float[] sz = parseFloats(sizeStr, 3);
+                        float hx = sz[0] * 0.5f, hy = sz[1] * 0.5f, hz = sz[2] * 0.5f;
+                        compound.addShape(new BoxShape(new Vector3f(-hx, -hy, -hz), new Vector3f(hx, hy, hz)), localTransform);
+                    }
+                }
+
+                NodeList cylNodes = geomElem.getElementsByTagName("cylinder");
+                if (cylNodes.getLength() > 0) {
+                    Element cylElem = (Element) cylNodes.item(0);
+                    float radius = parseSingleFloat(cylElem.getAttribute("radius"), 0.05f);
+                    float length = parseSingleFloat(cylElem.getAttribute("length"), 0.1f);
+                    compound.addShape(new CylinderShape(radius, length), localTransform);
+                }
+
+                NodeList sphNodes = geomElem.getElementsByTagName("sphere");
+                if (sphNodes.getLength() > 0) {
+                    Element sphElem = (Element) sphNodes.item(0);
+                    float radius = parseSingleFloat(sphElem.getAttribute("radius"), 0.05f);
+                    compound.addShape(new SphereShape(radius), localTransform);
+                }
+
+                NodeList capNodes = geomElem.getElementsByTagName("capsule");
+                if (capNodes.getLength() > 0) {
+                    Element capElem = (Element) capNodes.item(0);
+                    float radius = parseSingleFloat(capElem.getAttribute("radius"), 0.05f);
+                    float length = parseSingleFloat(capElem.getAttribute("length"), 0.1f);
+                    compound.addShape(new CapsuleShape(radius, length), localTransform);
+                }
+
+                NodeList meshNodes = geomElem.getElementsByTagName("mesh");
+                if (meshNodes.getLength() > 0) {
+                    Element meshElem = (Element) meshNodes.item(0);
+                    String filename = meshElem.getAttribute("filename");
+                    String scaleStr = meshElem.getAttribute("scale");
+                    Vector3f scale = new Vector3f(1, 1, 1);
+                    if (scaleStr != null && !scaleStr.trim().isEmpty()) {
+                        float[] s = parseFloats(scaleStr, 3);
+                        scale.set(s[0], s[1], s[2]);
+                    }
+                    if (filename != null && !filename.trim().isEmpty()) {
+                        File resolved = resolveMeshFile(filename, baseDir);
+                        if (resolved != null && resolved.exists()) {
+                            try {
+                                String path = resolved.getAbsolutePath();
+                                Mesh m = path.toLowerCase().endsWith(".stl") ? StlLoader.load(path) : ObjLoader.load(path);
+                                if (m != null) {
+                                    if (scale.x != 1 || scale.y != 1 || scale.z != 1) {
+                                        m = Mesh.createScaled(m, scale);
+                                    }
+                                    compound.addShape(new ConvexMeshShape(m), localTransform);
+                                }
+                            } catch (Exception ex) {
+                                System.err.println("Warning: could not load collision mesh: " + filename);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        if (compound.isEmpty() && fallbackVisualMeshes != null && !fallbackVisualMeshes.isEmpty()) {
+            for (Mesh vMesh : fallbackVisualMeshes) {
+                compound.addShape(new ConvexMeshShape(vMesh));
+            }
+        }
+
+        return compound;
     }
 
     private static File resolveMeshFile(String filename, File baseDir) {

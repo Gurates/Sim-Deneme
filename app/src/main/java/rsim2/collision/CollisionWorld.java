@@ -13,7 +13,7 @@ public class CollisionWorld {
     private final CollisionFilter filter = new CollisionFilter();
     private final CollisionResult lastResult = new CollisionResult();
 
-    private final Map<SceneNode, BoxShape> nodeShapes = new HashMap<>();
+    private final Map<SceneNode, CollisionShape> nodeShapes = new HashMap<>();
     private final Map<SceneNode, AABB> worldAABBs = new HashMap<>();
     private final Map<SceneNode, OBB> worldOBBs = new HashMap<>();
 
@@ -42,6 +42,10 @@ public class CollisionWorld {
         return worldOBBs;
     }
 
+    public Map<SceneNode, CollisionShape> getNodeShapes() {
+        return nodeShapes;
+    }
+
     public CollisionResult update(SceneNode rootNode, List<Joint> joints) {
         long startTimeNanos = System.nanoTime();
         lastResult.clear();
@@ -60,13 +64,19 @@ public class CollisionWorld {
         }
 
         for (SceneNode node : meshNodes) {
-            BoxShape shape = nodeShapes.computeIfAbsent(node, n -> {
-                BoxShape bs = new BoxShape();
-                bs.setLocalBounds(n.getCombinedBoundingBoxMin(), n.getCombinedBoundingBoxMax());
-                return bs;
-            });
-
-            shape.setLocalBounds(node.getCombinedBoundingBoxMin(), node.getCombinedBoundingBoxMax());
+            CollisionShape shape = node.getCollisionShape();
+            if (shape == null) {
+                shape = nodeShapes.computeIfAbsent(node, n -> {
+                    if (!n.getMeshes().isEmpty()) {
+                        return new ConvexMeshShape(n.getMeshes().get(0));
+                    }
+                    BoxShape bs = new BoxShape();
+                    bs.setLocalBounds(n.getCombinedBoundingBoxMin(), n.getCombinedBoundingBoxMax());
+                    return bs;
+                });
+            } else {
+                nodeShapes.put(node, shape);
+            }
 
             AABB worldAABB = worldAABBs.computeIfAbsent(node, n -> new AABB());
             OBB worldOBB = worldOBBs.computeIfAbsent(node, n -> new OBB());
@@ -90,11 +100,13 @@ public class CollisionWorld {
         }
 
         if (filter.isSelfCollisionEnabled()) {
+            float margin = filter.getCollisionMargin();
             int n = meshNodes.size();
             for (int i = 0; i < n; i++) {
                 SceneNode nodeA = meshNodes.get(i);
                 AABB aabbA = worldAABBs.get(nodeA);
                 OBB obbA = worldOBBs.get(nodeA);
+                CollisionShape shapeA = nodeShapes.get(nodeA);
 
                 for (int j = i + 1; j < n; j++) {
                     SceneNode nodeB = meshNodes.get(j);
@@ -105,6 +117,7 @@ public class CollisionWorld {
 
                     AABB aabbB = worldAABBs.get(nodeB);
                     OBB obbB = worldOBBs.get(nodeB);
+                    CollisionShape shapeB = nodeShapes.get(nodeB);
 
                     if (aabbA == null || aabbB == null || obbA == null || obbB == null) {
                         continue;
@@ -114,7 +127,13 @@ public class CollisionWorld {
                         continue;
                     }
 
-                    if (CollisionMath.intersectOBBOBB(obbA, obbB)) {
+                    if (shapeA != null && shapeB != null) {
+                        if (CollisionMath.intersectShapes(shapeA, nodeA.getWorldTransform(),
+                                shapeB, nodeB.getWorldTransform(), margin)) {
+                            Vector3f contactPoint = new Vector3f(obbA.getCenter()).add(obbB.getCenter()).mul(0.5f);
+                            lastResult.addContact(ContactPair.createSelfCollision(nodeA, nodeB, contactPoint));
+                        }
+                    } else if (CollisionMath.intersectOBBOBB(obbA, obbB)) {
                         Vector3f contactPoint = new Vector3f(obbA.getCenter()).add(obbB.getCenter()).mul(0.5f);
                         lastResult.addContact(ContactPair.createSelfCollision(nodeA, nodeB, contactPoint));
                     }

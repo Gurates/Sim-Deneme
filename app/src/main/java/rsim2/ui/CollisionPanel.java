@@ -122,6 +122,16 @@ public class CollisionPanel {
                 collisionWorld.setDebugWireframesEnabled(debugWireframes.get());
             }
 
+            float[] marginMm = new float[]{ filter.getCollisionMargin() * 1000.0f };
+            ImGui.setNextItemWidth(120.0f);
+            if (ImGui.sliderFloat("Margin (mm)", marginMm, 0.0f, 5.0f, "%.1f mm")) {
+                filter.setCollisionMargin(marginMm[0] * 0.001f);
+            }
+
+            if (filter.isAutoAcmComputed()) {
+                ImGui.textColored(0.3f, 0.8f, 0.4f, 1.0f, "ACM (Allowed Collision Matrix): Active");
+            }
+
             ImGui.separator();
             ImGui.spacing();
 

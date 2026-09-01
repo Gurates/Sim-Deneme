@@ -231,4 +231,18 @@ public class SceneNode {
     public List<SceneNode> getChildren() {
         return children;
     }
+
+    private rsim2.collision.CollisionShape collisionShape;
+
+    public rsim2.collision.CollisionShape getCollisionShape() {
+        return collisionShape;
+    }
+
+    public void setCollisionShape(rsim2.collision.CollisionShape collisionShape) {
+        this.collisionShape = collisionShape;
+    }
+
+    public boolean hasExplicitCollisionShape() {
+        return collisionShape != null;
+    }
 }

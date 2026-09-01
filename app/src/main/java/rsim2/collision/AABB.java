@@ -38,6 +38,10 @@ public class AABB {
         this.max.set(-Float.MAX_VALUE, -Float.MAX_VALUE, -Float.MAX_VALUE);
     }
 
+    public void clear() {
+        reset();
+    }
+
     public Vector3f getMin() {
         return min;
     }

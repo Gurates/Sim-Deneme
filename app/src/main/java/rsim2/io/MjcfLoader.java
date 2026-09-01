@@ -1,5 +1,6 @@
 package rsim2.io;
 
+import org.joml.Matrix4f;
 import org.joml.Quaternionf;
 import org.joml.Vector3f;
 import org.w3c.dom.Document;
@@ -7,6 +8,7 @@ import org.w3c.dom.Element;
 import org.w3c.dom.NamedNodeMap;
 import org.w3c.dom.Node;
 import org.w3c.dom.NodeList;
+import rsim2.collision.*;
 import rsim2.graphics.Mesh;
 import rsim2.scene.Joint;
 import rsim2.scene.JointType;
@@ -146,6 +148,20 @@ public class MjcfLoader {
                         worldChildClass, classDefaults, globalDefaults, result);
                 if (topNode != null) {
                     topBodies.add(topNode);
+                }
+            }
+        }
+
+        NodeList contactNodes = rootElem.getElementsByTagName("contact");
+        for (int c = 0; c < contactNodes.getLength(); c++) {
+            Element contactElem = (Element) contactNodes.item(c);
+            NodeList excludeNodes = contactElem.getElementsByTagName("exclude");
+            for (int e = 0; e < excludeNodes.getLength(); e++) {
+                Element exElem = (Element) excludeNodes.item(e);
+                String body1 = exElem.getAttribute("body1");
+                String body2 = exElem.getAttribute("body2");
+                if (body1 != null && body2 != null && !body1.trim().isEmpty() && !body2.trim().isEmpty()) {
+                    result.disabledCollisionPairs.add(new String[]{body1.trim(), body2.trim()});
                 }
             }
         }
@@ -321,6 +337,7 @@ public class MjcfLoader {
         }
 
         List<Mesh> bodyMeshes = new ArrayList<>();
+        CompoundShape compoundShape = new CompoundShape();
         NodeList geomNodes = bodyElem.getChildNodes();
         for (int i = 0; i < geomNodes.getLength(); i++) {
             Node gNode = geomNodes.item(i);
@@ -334,6 +351,62 @@ public class MjcfLoader {
                 geomClass = bodyChildClass;
             } else {
                 geomClass = geomClass.trim();
+            }
+
+            Matrix4f geomLocalTransform = new Matrix4f();
+            String gPosAttr = resolveAttribute(geomElem, "geom", "pos", geomClass, classDefaults, globalDefaults);
+            if (gPosAttr != null && !gPosAttr.isEmpty()) {
+                float[] gp = parseFloats(gPosAttr, 3, 0.0f);
+                geomLocalTransform.translation(gp[0], gp[1], gp[2]);
+            }
+            String gQuatAttr = resolveAttribute(geomElem, "geom", "quat", geomClass, classDefaults, globalDefaults);
+            if (gQuatAttr != null && !gQuatAttr.isEmpty()) {
+                float[] gq = parseFloats(gQuatAttr, 4, 0.0f);
+                Quaternionf gRot = new Quaternionf(gq[1], gq[2], gq[3], gq[0]).normalize();
+                geomLocalTransform.rotate(gRot);
+            }
+
+            String geomType = resolveAttribute(geomElem, "geom", "type", geomClass, classDefaults, globalDefaults);
+            if (geomType == null || geomType.isEmpty()) {
+                geomType = geomElem.getAttribute("type");
+            }
+
+            String sizeAttr = resolveAttribute(geomElem, "geom", "size", geomClass, classDefaults, globalDefaults);
+            if (sizeAttr == null || sizeAttr.isEmpty()) {
+                sizeAttr = geomElem.getAttribute("size");
+            }
+
+            String fromtoAttr = resolveAttribute(geomElem, "geom", "fromto", geomClass, classDefaults, globalDefaults);
+            if (fromtoAttr == null || fromtoAttr.isEmpty()) {
+                fromtoAttr = geomElem.getAttribute("fromto");
+            }
+
+            if (fromtoAttr != null && !fromtoAttr.trim().isEmpty()) {
+                float[] ft = parseFloats(fromtoAttr, 6, 0.0f);
+                float radius = 0.02f;
+                if (sizeAttr != null && !sizeAttr.trim().isEmpty()) {
+                    float[] sz = parseFloats(sizeAttr, 1, 0.02f);
+                    radius = sz[0];
+                }
+                Vector3f p0 = new Vector3f(ft[0], ft[1], ft[2]);
+                Vector3f p1 = new Vector3f(ft[3], ft[4], ft[5]);
+                compoundShape.addShape(new CapsuleShape(p0, p1, radius));
+            } else if ("capsule".equalsIgnoreCase(geomType)) {
+                float[] sz = parseFloats(sizeAttr, 2, 0.02f);
+                float radius = sz[0];
+                float halfLen = sz.length > 1 ? sz[1] : 0.05f;
+                compoundShape.addShape(new CapsuleShape(radius, halfLen * 2.0f), geomLocalTransform);
+            } else if ("sphere".equalsIgnoreCase(geomType)) {
+                float[] sz = parseFloats(sizeAttr, 1, 0.02f);
+                compoundShape.addShape(new SphereShape(sz[0]), geomLocalTransform);
+            } else if ("cylinder".equalsIgnoreCase(geomType)) {
+                float[] sz = parseFloats(sizeAttr, 2, 0.02f);
+                float radius = sz[0];
+                float halfLen = sz.length > 1 ? sz[1] : 0.05f;
+                compoundShape.addShape(new CylinderShape(radius, halfLen * 2.0f), geomLocalTransform);
+            } else if ("box".equalsIgnoreCase(geomType)) {
+                float[] sz = parseFloats(sizeAttr, 3, 0.02f);
+                compoundShape.addShape(new BoxShape(new Vector3f(-sz[0], -sz[1], -sz[2]), new Vector3f(sz[0], sz[1], sz[2])), geomLocalTransform);
             }
 
             String geomMeshName = resolveAttribute(geomElem, "geom", "mesh", geomClass, classDefaults, globalDefaults);
@@ -363,6 +436,7 @@ public class MjcfLoader {
                             }
                             m.setSourcePath(path);
                             bodyMeshes.add(m);
+                            compoundShape.addShape(new ConvexMeshShape(m), geomLocalTransform);
                         }
                     } catch (Exception ex) {
                         System.err.println("Warning: failed to load MuJoCo mesh: " + resolved.getAbsolutePath() + " (" + ex.getMessage() + ")");
@@ -376,6 +450,15 @@ public class MjcfLoader {
         SceneNode bodyNode = new SceneNode(bodyName, bodyMeshes);
         bodyNode.getLocalPosition().set(pos);
         bodyNode.getLocalRotation().set(rot);
+
+        if (!compoundShape.isEmpty()) {
+            bodyNode.setCollisionShape(compoundShape);
+        } else if (!bodyMeshes.isEmpty()) {
+            for (Mesh bm : bodyMeshes) {
+                compoundShape.addShape(new ConvexMeshShape(bm));
+            }
+            bodyNode.setCollisionShape(compoundShape);
+        }
 
         if (!bodyMeshes.isEmpty() && bodyMeshes.get(0).getSourcePath() != null) {
             bodyNode.setSourceMeshPath(bodyMeshes.get(0).getSourcePath());

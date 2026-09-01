@@ -33,8 +33,17 @@ public class CollisionDetectionTest {
             test.testOBBIntersectionSAT();
             System.out.println("[PASS] testOBBIntersectionSAT");
 
+            test.testGJKAndAnalyticalPrimitives();
+            System.out.println("[PASS] testGJKAndAnalyticalPrimitives");
+
+            test.testCompoundShapeHierarchy();
+            System.out.println("[PASS] testCompoundShapeHierarchy");
+
             test.testKinematicJointAdjacencyFilter();
             System.out.println("[PASS] testKinematicJointAdjacencyFilter");
+
+            test.testAutoACM();
+            System.out.println("[PASS] testAutoACM");
 
             test.testCollisionWorldSelfAndGroundCollision();
             System.out.println("[PASS] testCollisionWorldSelfAndGroundCollision");
@@ -45,7 +54,7 @@ public class CollisionDetectionTest {
             test.testSafetyFilterCollisionStopIntegration();
             System.out.println("[PASS] testSafetyFilterCollisionStopIntegration");
 
-            System.out.println("\nALL 6 COLLISION DETECTION TESTS PASSED SUCCESSFULLY (100%)!");
+            System.out.println("\nALL 9 COLLISION DETECTION TESTS PASSED SUCCESSFULLY (100%)!");
         } catch (Throwable t) {
             System.err.println("\n[FAIL] Test threw exception: " + t.getMessage());
             t.printStackTrace();
@@ -277,6 +286,72 @@ public class CollisionDetectionTest {
         boolean badPass = world.validateTrajectory(badSwing, joints2, root2, 0.1f, badLogs);
         assertFalse(badPass, "Trajectory swinging below ground plane must fail validation");
         assertFalse(badLogs.isEmpty(), "Trajectory validator must generate collision logs");
+    }
+
+    @Test
+    public void testGJKAndAnalyticalPrimitives() {
+        SphereShape s1 = new SphereShape(new Vector3f(0, 0, 0), 0.5f);
+        SphereShape s2 = new SphereShape(new Vector3f(0.8f, 0, 0), 0.5f);
+        SphereShape s3 = new SphereShape(new Vector3f(2.0f, 0, 0), 0.5f);
+
+        assertTrue(CollisionMath.intersectShapes(s1, null, s2, null, 0.0f), "Overlapping spheres must collide");
+        assertFalse(CollisionMath.intersectShapes(s1, null, s3, null, 0.0f), "Separated spheres must not collide");
+
+        CapsuleShape c1 = new CapsuleShape(new Vector3f(0, -1, 0), new Vector3f(0, 1, 0), 0.2f);
+        CapsuleShape c2 = new CapsuleShape(new Vector3f(0.3f, -1, 0), new Vector3f(0.3f, 1, 0), 0.2f);
+        CapsuleShape c3 = new CapsuleShape(new Vector3f(2.0f, -1, 0), new Vector3f(2.0f, 1, 0), 0.2f);
+
+        assertTrue(CollisionMath.intersectShapes(c1, null, c2, null, 0.0f), "Parallel overlapping capsules must collide");
+        assertFalse(CollisionMath.intersectShapes(c1, null, c3, null, 0.0f), "Separated capsules must not collide");
+
+        BoxShape b1 = new BoxShape(new Vector3f(-0.5f, -0.5f, -0.5f), new Vector3f(0.5f, 0.5f, 0.5f));
+        BoxShape b2 = new BoxShape(new Vector3f(-0.5f, -0.5f, -0.5f), new Vector3f(0.5f, 0.5f, 0.5f));
+        Matrix4f tB2 = new Matrix4f().translate(0.8f, 0, 0);
+        Matrix4f tB3 = new Matrix4f().translate(3.0f, 0, 0);
+
+        assertTrue(CollisionMath.intersectGJK(b1, null, b2, tB2, 0.0f), "GJK on overlapping boxes must return true");
+        assertFalse(CollisionMath.intersectGJK(b1, null, b2, tB3, 0.0f), "GJK on separated boxes must return false");
+    }
+
+    @Test
+    public void testCompoundShapeHierarchy() {
+        CompoundShape compA = new CompoundShape();
+        compA.addShape(new SphereShape(new Vector3f(0, 0, 0), 0.2f));
+        compA.addShape(new CapsuleShape(new Vector3f(0, 0, 0), new Vector3f(0, 1, 0), 0.1f));
+
+        CompoundShape compB = new CompoundShape();
+        compB.addShape(new SphereShape(new Vector3f(0, 0.5f, 0), 0.2f));
+
+        assertTrue(CollisionMath.intersectShapes(compA, null, compB, null, 0.0f),
+                "Compound shape overlapping child shape must collide");
+
+        Matrix4f farTransform = new Matrix4f().translate(5, 5, 5);
+        assertFalse(CollisionMath.intersectShapes(compA, null, compB, farTransform, 0.0f),
+                "Compound shapes far apart must not collide");
+    }
+
+    @Test
+    public void testAutoACM() {
+        CollisionWorld world = new CollisionWorld();
+        SceneNode root = new SceneNode("root");
+        SceneNode linkA = new SceneNode("link_a");
+        SceneNode linkB = new SceneNode("link_b");
+
+        linkA.addMesh(createTestCubeMesh(0.5f));
+        linkB.addMesh(createTestCubeMesh(0.5f));
+
+        linkA.getLocalPosition().set(0, 2, 0);
+        linkB.getLocalPosition().set(0, 2, 0);
+
+        root.addChild(linkA);
+        root.addChild(linkB);
+
+        CollisionFilter filter = world.getFilter();
+        assertFalse(filter.isPairIgnored("link_a", "link_b"));
+
+        filter.computeAutoAcm(root, new ArrayList<>(), world);
+        assertTrue(filter.isAutoAcmComputed());
+        assertTrue(filter.isPairIgnored("link_a", "link_b"), "Initial rest-pose overlap must be added to Auto-ACM");
     }
 
     @Test

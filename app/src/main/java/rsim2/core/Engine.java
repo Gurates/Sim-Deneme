@@ -228,6 +228,10 @@ public class Engine {
                 collisionPanel.setRootNode(this.rootNode);
                 collisionPanel.setJoints(this.joints);
             }
+            if (collisionWorld != null) {
+                collisionWorld.getFilter().clearIgnoredPairs();
+                collisionWorld.getFilter().computeAutoAcm(this.rootNode, this.joints, collisionWorld);
+            }
             if (motionPlayer != null) {
                 motionPlayer.stop();
             }
@@ -290,6 +294,13 @@ public class Engine {
             if (collisionPanel != null) {
                 collisionPanel.setRootNode(this.rootNode);
                 collisionPanel.setJoints(this.joints);
+            }
+            if (collisionWorld != null) {
+                collisionWorld.getFilter().clearIgnoredPairs();
+                if (res.disabledCollisionPairs != null) {
+                    collisionWorld.getFilter().loadDisabledPairs(res.disabledCollisionPairs);
+                }
+                collisionWorld.getFilter().computeAutoAcm(this.rootNode, this.joints, collisionWorld);
             }
             if (motionPlayer != null) {
                 motionPlayer.stop();

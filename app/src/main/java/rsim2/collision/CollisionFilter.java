@@ -14,6 +14,8 @@ public class CollisionFilter {
     private boolean ignoreAdjacentJoints = true;
     private int jointAdjacencyDepth = 2;
     private float groundHeight = 0.0f;
+    private float collisionMargin = 0.001f;
+    private boolean autoAcmComputed = false;
 
     private final Set<String> customIgnoredPairs = new HashSet<>();
 
@@ -42,6 +44,26 @@ public class CollisionFilter {
         return customIgnoredPairs.contains(getPairKey(idA, idB));
     }
 
+    public void loadDisabledPairs(List<String[]> pairs) {
+        if (pairs == null) return;
+        for (String[] pair : pairs) {
+            if (pair != null && pair.length >= 2) {
+                ignorePair(pair[0], pair[1]);
+            }
+        }
+    }
+
+    public void computeAutoAcm(SceneNode root, List<Joint> joints, CollisionWorld world) {
+        if (root == null || world == null) return;
+        CollisionResult rawResult = world.update(root, joints);
+        for (ContactPair contact : rawResult.getContacts()) {
+            if (contact.getNodeA() != null && contact.getNodeB() != null) {
+                ignorePair(contact.getNodeA().getId(), contact.getNodeB().getId());
+            }
+        }
+        this.autoAcmComputed = true;
+    }
+
     public void ignoreCurrentContacts(CollisionResult result) {
         if (result == null) return;
         for (ContactPair contact : result.getContacts()) {
@@ -53,10 +75,23 @@ public class CollisionFilter {
 
     public void clearIgnoredPairs() {
         customIgnoredPairs.clear();
+        autoAcmComputed = false;
     }
 
     public Set<String> getCustomIgnoredPairs() {
         return customIgnoredPairs;
+    }
+
+    public float getCollisionMargin() {
+        return collisionMargin;
+    }
+
+    public void setCollisionMargin(float collisionMargin) {
+        this.collisionMargin = Math.max(0.0f, Math.min(0.05f, collisionMargin));
+    }
+
+    public boolean isAutoAcmComputed() {
+        return autoAcmComputed;
     }
 
     public boolean shouldCheckPair(SceneNode a, SceneNode b, List<Joint> joints) {
