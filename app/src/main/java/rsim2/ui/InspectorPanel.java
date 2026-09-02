@@ -5,7 +5,9 @@ import imgui.flag.ImGuiCol;
 import imgui.flag.ImGuiCond;
 import imgui.flag.ImGuiTreeNodeFlags;
 import imgui.flag.ImGuiWindowFlags;
+import imgui.type.ImBoolean;
 import imgui.type.ImFloat;
+import imgui.type.ImInt;
 import org.joml.Vector3f;
 import rsim2.core.Engine;
 import rsim2.editor.SelectionManager;
@@ -32,6 +34,10 @@ public class InspectorPanel {
     private final ImFloat rotY = new ImFloat();
     private final ImFloat rotZ = new ImFloat();
     private final ImFloat valScale = new ImFloat();
+
+    private final ImInt jointPinVal = new ImInt();
+    private final ImBoolean jointInvertVal = new ImBoolean();
+    private final float[] jointOffsetArr = new float[1];
 
     public InspectorPanel(Engine engine, SceneNode rootNode, SelectionManager selectionManager, List<Joint> joints,
             CommandHistory commandHistory) {
@@ -211,7 +217,7 @@ public class InspectorPanel {
                     ImGui.spacing();
                     ImGui.separator();
                     ImGui.spacing();
-                    ImGui.text("Motor Control");
+                    ImGui.textColored(0.3f, 0.85f, 1.0f, 1.0f, "Motor Dynamics & Control");
 
                     MotorController motor = existingJoint.getMotor();
                     float minDeg = (float) Math.toDegrees(motor.getMinLimitRadians());
@@ -224,18 +230,84 @@ public class InspectorPanel {
                         motor.setTargetAngleRadians(angleArr[0]);
                     }
 
+                    float[] speedPct = new float[] { motor.getTargetSpeedRatio() * 100.0f };
+                    ImGui.text("Cruise Speed Ratio");
+                    ImGui.setNextItemWidth(-1.0f);
+                    if (ImGui.sliderFloat("##speedRatio", speedPct, 5.0f, 100.0f, "%.0f %%")) {
+                        motor.setTargetSpeedRatio(speedPct[0] / 100.0f);
+                    }
+                    if (ImGui.isItemHovered()) {
+                        ImGui.setTooltip("Active cruising speed as a percentage of physical top speed");
+                    }
+
+                    float[] accelArr = new float[] { motor.getAcceleration() };
+                    ImGui.text("Acceleration (Ramp)");
+                    ImGui.setNextItemWidth(-1.0f);
+                    if (ImGui.sliderFloat("##accelRamp", accelArr, 0.5f, 40.0f, "%.1f rad/s²")) {
+                        motor.setAcceleration(accelArr[0]);
+                    }
+                    if (ImGui.isItemHovered()) {
+                        ImGui.setTooltip("Rate of speed increase and deceleration braking ramp");
+                    }
+
                     float currentDeg = (float) Math.toDegrees(existingJoint.getCurrentAngleRadians());
                     float targetDeg = (float) Math.toDegrees(motor.getTargetAngleRadians());
+                    float liveVel = motor.getCurrentVelocity();
+                    float liveVelDeg = (float) Math.toDegrees(liveVel);
+                    String status = motor.getMotionStatus();
 
                     ImGui.spacing();
-                    ImGui.text(String.format("Current: %.1f deg | Target: %.1f deg", currentDeg, targetDeg));
-                    ImGui.textDisabled(String.format("Speed: %.1f rad/s | Limits: [%.0f deg, %.0f deg]",
+                    ImGui.text(String.format("Angle: %.1f deg  ->  Target: %.1f deg", currentDeg, targetDeg));
+                    ImGui.text(String.format("Live Velocity: %.2f rad/s (%.1f deg/s)", liveVel, liveVelDeg));
+
+                    ImGui.text("Motion State: ");
+                    ImGui.sameLine();
+                    if ("ACCELERATING".equals(status)) {
+                        ImGui.textColored(0.2f, 0.8f, 1.0f, 1.0f, "ACCELERATING");
+                    } else if ("CRUISING".equals(status)) {
+                        ImGui.textColored(0.2f, 0.95f, 0.3f, 1.0f, "CRUISING");
+                    } else if ("BRAKING".equals(status)) {
+                        ImGui.textColored(1.0f, 0.75f, 0.2f, 1.0f, "BRAKING");
+                    } else {
+                        ImGui.textColored(0.6f, 0.6f, 0.6f, 1.0f, "IDLE");
+                    }
+
+                    ImGui.textDisabled(String.format("Max Cap: %.1f rad/s | Limits: [%.0f deg, %.0f deg]",
                             motor.getMaxSpeedRadiansPerSecond(), minDeg, maxDeg));
 
                     ImGui.spacing();
-                    if (ImGui.button("Reset Angle (0 deg)", -1.0f, 26.0f)) {
+                    if (ImGui.button("Reset Angle (0 deg)", -1.0f, 24.0f)) {
                         motor.setTargetAngleRadians(0.0f);
                     }
+                }
+
+                ImGui.spacing();
+                ImGui.separator();
+                ImGui.spacing();
+                ImGui.textColored(0.2f, 0.7f, 1.0f, 1.0f, "Hardware / Pin Mapping");
+
+                int currentPin = existingJoint.getPin();
+                jointPinVal.set(currentPin >= 0 ? currentPin : 9);
+                ImGui.setNextItemWidth(140.0f);
+                if (ImGui.inputInt("Pin / GPIO / I2C Ch##hwPin", jointPinVal)) {
+                    existingJoint.setPin(jointPinVal.get());
+                }
+                if (ImGui.isItemHovered()) {
+                    ImGui.setTooltip("Arduino/ESP32 pin number or Raspberry Pi GPIO / PCA9685 I2C channel (0-15)");
+                }
+
+                jointInvertVal.set(existingJoint.isInverted());
+                if (ImGui.checkbox("Invert Direction (-1x)##hwInv", jointInvertVal)) {
+                    existingJoint.setInverted(jointInvertVal.get());
+                }
+
+                jointOffsetArr[0] = existingJoint.getZeroOffsetDeg();
+                ImGui.setNextItemWidth(-1.0f);
+                if (ImGui.sliderFloat("##hwOffset", jointOffsetArr, -90.0f, 90.0f, "Offset: %.1f deg")) {
+                    existingJoint.setZeroOffsetDeg(jointOffsetArr[0]);
+                }
+                if (ImGui.isItemHovered()) {
+                    ImGui.setTooltip("Zero position angular offset in degrees");
                 }
             }
         }

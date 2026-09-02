@@ -6,7 +6,10 @@ import com.google.gson.JsonObject;
 import java.net.DatagramPacket;
 import java.net.DatagramSocket;
 import java.net.InetAddress;
+import java.net.SocketException;
+import java.net.SocketTimeoutException;
 import java.nio.charset.StandardCharsets;
+import java.util.HashMap;
 import java.util.Map;
 
 public class UdpBridge implements RobotBridge {
@@ -25,6 +28,9 @@ public class UdpBridge implements RobotBridge {
 
     private byte[] sendBuffer = new byte[2048];
 
+    private TelemetryListener telemetryListener;
+    private Thread listenerThread;
+
     @Override
     public String getName() {
         return "UDP Socket (ESP32 / Wi-Fi / Ethernet)";
@@ -42,6 +48,11 @@ public class UdpBridge implements RobotBridge {
             this.connected = true;
             this.sequenceNumber = 0;
             this.stats.reset();
+
+            this.listenerThread = new Thread(this::listenLoop, "UdpBridge-Receiver");
+            this.listenerThread.setDaemon(true);
+            this.listenerThread.start();
+
             return true;
         } catch (Exception e) {
             stats.recordError("UDP Connect Failed: " + e.getMessage());
@@ -57,6 +68,53 @@ public class UdpBridge implements RobotBridge {
             socket.close();
         }
         socket = null;
+        if (listenerThread != null) {
+            listenerThread.interrupt();
+            listenerThread = null;
+        }
+    }
+
+    private void listenLoop() {
+        byte[] rxBuffer = new byte[4096];
+        DatagramPacket rxPacket = new DatagramPacket(rxBuffer, rxBuffer.length);
+        while (connected && socket != null && !socket.isClosed()) {
+            try {
+                socket.receive(rxPacket);
+                String msg = new String(rxPacket.getData(), rxPacket.getOffset(), rxPacket.getLength(), StandardCharsets.UTF_8).trim();
+                stats.recordPacketReceived();
+                if (!msg.isEmpty() && telemetryListener != null) {
+                    try {
+                        JsonObject json = gson.fromJson(msg, JsonObject.class);
+                        if (json != null && json.has("joints") && json.get("joints").isJsonObject()) {
+                            JsonObject jointsObj = json.getAsJsonObject("joints");
+                            Map<String, Float> angles = new HashMap<>();
+                            for (String key : jointsObj.keySet()) {
+                                angles.put(key, jointsObj.get(key).getAsFloat());
+                            }
+                            telemetryListener.onJointAnglesReceived(angles);
+                        }
+                    } catch (Exception ignored) {
+                    }
+                }
+            } catch (SocketTimeoutException ignored) {
+            } catch (SocketException ignored) {
+                break;
+            } catch (Exception e) {
+                if (connected) {
+                    stats.recordError("UDP Rx Error: " + e.getMessage());
+                }
+            }
+        }
+    }
+
+    @Override
+    public synchronized void setTelemetryListener(TelemetryListener listener) {
+        this.telemetryListener = listener;
+    }
+
+    @Override
+    public synchronized boolean isListening() {
+        return connected && listenerThread != null && listenerThread.isAlive();
     }
 
     @Override

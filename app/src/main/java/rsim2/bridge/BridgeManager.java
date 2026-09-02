@@ -25,12 +25,20 @@ public class BridgeManager {
     private long ppsWindowStartNanos = 0;
     private int ppsPacketCount = 0;
 
+    private boolean digitalTwinEnabled = false;
+    private List<Joint> registeredJoints;
+    private final Map<String, Float> lastReceivedTelemetryAngles = new HashMap<>();
+
     private BridgeManager() {
         UdpBridge udp = new UdpBridge();
         MockHardwareBridge mock = new MockHardwareBridge();
 
         availableBridges.add(udp);
         availableBridges.add(mock);
+
+        for (RobotBridge b : availableBridges) {
+            b.setTelemetryListener(this::onTelemetryReceived);
+        }
 
         this.activeBridge = udp;
     }
@@ -52,6 +60,46 @@ public class BridgeManager {
             this.activeBridge.disconnect();
         }
         this.activeBridge = bridge != null ? bridge : availableBridges.get(0);
+        this.activeBridge.setTelemetryListener(this::onTelemetryReceived);
+    }
+
+    public synchronized void registerJoints(List<Joint> joints) {
+        this.registeredJoints = joints;
+    }
+
+    public synchronized boolean isDigitalTwinEnabled() {
+        return digitalTwinEnabled;
+    }
+
+    public synchronized void setDigitalTwinEnabled(boolean enabled) {
+        this.digitalTwinEnabled = enabled;
+    }
+
+    public synchronized Map<String, Float> getLastReceivedTelemetryAngles() {
+        return new HashMap<>(lastReceivedTelemetryAngles);
+    }
+
+    public synchronized void onTelemetryReceived(Map<String, Float> angles) {
+        if (angles == null) return;
+        lastReceivedTelemetryAngles.putAll(angles);
+        if (digitalTwinEnabled && registeredJoints != null) {
+            for (Joint j : registeredJoints) {
+                if (j == null || j.getId() == null) continue;
+                Float deg = angles.get(j.getId());
+                if (deg != null && Float.isFinite(deg)) {
+                    float adjustedDeg = deg;
+                    adjustedDeg -= j.getZeroOffsetDeg();
+                    if (j.isInverted()) {
+                        adjustedDeg = 180.0f - adjustedDeg;
+                    }
+                    float rad = (float) Math.toRadians(adjustedDeg);
+                    j.setAngle(rad);
+                    if (j.getMotor() != null) {
+                        j.getMotor().setTargetAngleRadians(rad);
+                    }
+                }
+            }
+        }
     }
 
     public SafetyFilter getSafetyFilter() {
@@ -98,7 +146,9 @@ public class BridgeManager {
     }
 
     public synchronized void streamCurrentJointStates(List<Joint> joints, float timestamp) {
-        if (joints == null || !liveSyncEnabled) return;
+        if (joints == null) return;
+        this.registeredJoints = joints;
+        if (!liveSyncEnabled) return;
 
         reusableDegreesMap.clear();
         for (Joint j : joints) {

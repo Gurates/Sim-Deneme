@@ -7,15 +7,26 @@ public class MotorController {
     private float minLimitRadians;
     private float maxLimitRadians;
 
+    private float targetSpeedRatio = 1.0f;
+
+    private float acceleration = 8.0f;
+
+    private float currentVelocity = 0.0f;
+
     public MotorController(Joint targetJoint) {
-        this(targetJoint, 2.0f, -(float) Math.PI, (float) Math.PI);
+        this(targetJoint, 2.0f, -(float) Math.PI, (float) Math.PI, 8.0f);
     }
 
     public MotorController(Joint targetJoint, float maxSpeedRadiansPerSecond, float minLimitRadians, float maxLimitRadians) {
+        this(targetJoint, maxSpeedRadiansPerSecond, minLimitRadians, maxLimitRadians, 8.0f);
+    }
+
+    public MotorController(Joint targetJoint, float maxSpeedRadiansPerSecond, float minLimitRadians, float maxLimitRadians, float acceleration) {
         this.targetJoint = targetJoint;
         this.maxSpeedRadiansPerSecond = Math.max(0.001f, maxSpeedRadiansPerSecond);
         this.minLimitRadians = minLimitRadians;
         this.maxLimitRadians = maxLimitRadians;
+        this.acceleration = Math.max(0.01f, acceleration);
         this.targetAngleRadians = clamp(targetJoint != null ? targetJoint.getCurrentAngleRadians() : 0.0f, minLimitRadians, maxLimitRadians);
     }
 
@@ -24,22 +35,65 @@ public class MotorController {
             return;
         }
 
+        deltaTime = Math.min(deltaTime, 0.05f);
+
         float current = targetJoint.getCurrentAngleRadians();
         float target = clamp(targetAngleRadians, minLimitRadians, maxLimitRadians);
-        float diff = target - current;
+        float distance = target - current;
+        float absDist = Math.abs(distance);
 
-        if (Math.abs(diff) < 0.00001f) {
+        if (absDist < 0.0001f && Math.abs(currentVelocity) < 0.005f) {
+            currentVelocity = 0.0f;
+            targetJoint.setAngle(target);
             return;
         }
 
-        float maxStep = maxSpeedRadiansPerSecond * deltaTime;
+        float dir = Math.signum(distance);
+        float vCruise = Math.max(0.001f, maxSpeedRadiansPerSecond * targetSpeedRatio);
+        float safeAcc = Math.max(0.01f, acceleration);
 
-        if (Math.abs(diff) <= maxStep) {
-            targetJoint.setAngle(target);
+        float vMaxBraking = (float) Math.sqrt(2.0f * safeAcc * absDist);
+        float desiredSpeed = Math.min(vCruise, vMaxBraking);
+        float targetV = dir * desiredSpeed;
+
+        float vDiff = targetV - currentVelocity;
+        float maxDeltaV = safeAcc * deltaTime;
+
+        if (Math.abs(vDiff) <= maxDeltaV) {
+            currentVelocity = targetV;
         } else {
-            float step = Math.signum(diff) * maxStep;
+            currentVelocity += Math.signum(vDiff) * maxDeltaV;
+        }
+
+        float step = currentVelocity * deltaTime;
+
+        if (Math.abs(step) >= absDist || (Math.signum(distance) != Math.signum(distance - step))) {
+            targetJoint.setAngle(target);
+            currentVelocity = 0.0f;
+        } else {
             targetJoint.setAngle(current + step);
         }
+    }
+
+    public String getMotionStatus() {
+        float absV = Math.abs(currentVelocity);
+        float distance = Math.abs(targetAngleRadians - (targetJoint != null ? targetJoint.getCurrentAngleRadians() : 0.0f));
+
+        if (absV < 0.01f && distance < 0.001f) {
+            return "IDLE";
+        }
+
+        float vCruise = maxSpeedRadiansPerSecond * targetSpeedRatio;
+        float safeAcc = Math.max(0.01f, acceleration);
+        float brakingDist = (absV * absV) / (2.0f * safeAcc);
+
+        if (distance <= brakingDist * 1.1f && absV > 0.05f) {
+            return "BRAKING";
+        }
+        if (absV >= vCruise * 0.95f) {
+            return "CRUISING";
+        }
+        return "ACCELERATING";
     }
 
     private float clamp(float value, float min, float max) {
@@ -71,6 +125,34 @@ public class MotorController {
         this.maxSpeedRadiansPerSecond = Math.max(0.001f, maxSpeedRadiansPerSecond);
     }
 
+    public float getTargetSpeedRatio() {
+        return targetSpeedRatio;
+    }
+
+    public void setTargetSpeedRatio(float targetSpeedRatio) {
+        this.targetSpeedRatio = Math.max(0.05f, Math.min(1.0f, targetSpeedRatio));
+    }
+
+    public float getEffectiveCruiseSpeed() {
+        return maxSpeedRadiansPerSecond * targetSpeedRatio;
+    }
+
+    public float getAcceleration() {
+        return acceleration;
+    }
+
+    public void setAcceleration(float acceleration) {
+        this.acceleration = Math.max(0.01f, acceleration);
+    }
+
+    public float getCurrentVelocity() {
+        return currentVelocity;
+    }
+
+    public void setCurrentVelocity(float currentVelocity) {
+        this.currentVelocity = currentVelocity;
+    }
+
     public float getMinLimitRadians() {
         return minLimitRadians;
     }
@@ -89,3 +171,4 @@ public class MotorController {
         this.targetAngleRadians = clamp(this.targetAngleRadians, minLimitRadians, maxLimitRadians);
     }
 }
+

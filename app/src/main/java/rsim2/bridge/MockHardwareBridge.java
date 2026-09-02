@@ -56,7 +56,27 @@ public class MockHardwareBridge implements RobotBridge {
         return stats;
     }
 
+    private TelemetryListener telemetryListener;
+
+    @Override
+    public synchronized void setTelemetryListener(TelemetryListener listener) {
+        this.telemetryListener = listener;
+    }
+
+    @Override
+    public synchronized boolean isListening() {
+        return connected && telemetryListener != null;
+    }
+
+    public synchronized void simulateIncomingTelemetry(Map<String, Float> angles) {
+        if (connected && telemetryListener != null && angles != null) {
+            telemetryListener.onJointAnglesReceived(angles);
+            stats.recordPacketReceived();
+        }
+    }
+
     public synchronized Map<String, Float> getLastReceivedJoints() {
         return new HashMap<>(lastReceivedJoints);
     }
 }
+

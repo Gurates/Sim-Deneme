@@ -203,35 +203,53 @@ public class AiActionExecutor {
         float deg = targetDeg.floatValue();
         float targetRad = (float) Math.toRadians(deg);
 
+        Float speedRatio = null;
+        if (act.has("speed_ratio")) speedRatio = act.get("speed_ratio").getAsFloat();
+        else if (act.has("speed_pct")) speedRatio = act.get("speed_pct").getAsFloat() / 100.0f;
+        else if (act.has("speed") && act.get("speed").getAsFloat() <= 1.0f) speedRatio = act.get("speed").getAsFloat();
+
+        Float acceleration = null;
+        if (act.has("acceleration")) acceleration = act.get("acceleration").getAsFloat();
+        else if (act.has("accel")) acceleration = act.get("accel").getAsFloat();
+
         if ("ALL".equalsIgnoreCase(jointId) || "*".equals(jointId)) {
             for (Joint j : joints) {
-                applyJointTarget(j, targetRad, deg, result);
+                applyJointTarget(j, targetRad, deg, speedRatio, acceleration, result);
             }
         } else {
             Joint targetJoint = findJoint(joints, jointId);
             if (targetJoint != null) {
-                applyJointTarget(targetJoint, targetRad, deg, result);
+                applyJointTarget(targetJoint, targetRad, deg, speedRatio, acceleration, result);
             } else {
                 result.appliedActions.add("[Warning] Joint not found: " + jointId);
             }
         }
     }
 
-    private static void applyJointTarget(Joint j, float targetRad, float deg, ExecutionResult result) {
+    private static void applyJointTarget(Joint j, float targetRad, float deg, Float speedRatio, Float acceleration, ExecutionResult result) {
         float clampedRad = Math.max(j.getMinLimit(), Math.min(j.getMaxLimit(), targetRad));
         float clampedDeg = (float) Math.toDegrees(clampedRad);
 
         if (j.getMotor() != null) {
+            if (speedRatio != null && speedRatio > 0.0f) {
+                j.getMotor().setTargetSpeedRatio(speedRatio);
+            }
+            if (acceleration != null && acceleration > 0.0f) {
+                j.getMotor().setAcceleration(acceleration);
+            }
             j.getMotor().setTargetAngleRadians(clampedRad);
         } else {
             j.setAngle(clampedRad);
         }
 
+        StringBuilder sb = new StringBuilder(String.format("%s: %.1f deg", j.getId(), clampedDeg));
         if (Math.abs(clampedDeg - deg) > 0.01f) {
-            result.appliedActions.add(String.format("%s: %.1f deg (Clamped by limit to %.1f deg)", j.getId(), deg, clampedDeg));
-        } else {
-            result.appliedActions.add(String.format("%s: %.1f deg", j.getId(), clampedDeg));
+            sb.append(String.format(" (Clamped by limit from %.1f deg)", deg));
         }
+        if (speedRatio != null) {
+            sb.append(String.format(" @ %.0f%% speed", speedRatio * 100.0f));
+        }
+        result.appliedActions.add(sb.toString());
     }
 
     private static Joint findJoint(List<Joint> joints, String jointId) {

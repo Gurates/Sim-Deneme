@@ -143,7 +143,15 @@ public class RobotJsonIO {
 
                 if (j.getType() == JointType.REVOLUTE) {
                     jDto.limits = new LimitsDTO(j.getMinLimit(), j.getMaxLimit(), j.getMaxSpeed());
-                    jDto.motor = new MotorDTO("servo", 100.0f);
+                    jDto.motor = new MotorDTO(
+                            j.getMotorType() != null ? j.getMotorType() : "SERVO_PWM",
+                            100.0f,
+                            j.getPin(),
+                            j.isInverted(),
+                            j.getZeroOffsetDeg(),
+                            j.getAcceleration(),
+                            j.getTargetSpeedRatio()
+                    );
                 } else {
                     jDto.limits = null;
                     jDto.motor = null;
@@ -261,6 +269,20 @@ public class RobotJsonIO {
                 Joint joint = new Joint(jDto.id, parentNode, childNode, type, axis);
                 if (type == JointType.REVOLUTE && jDto.limits != null) {
                     joint.setLimits(jDto.limits.min, jDto.limits.max, jDto.limits.maxSpeed > 0 ? jDto.limits.maxSpeed : 2.0f);
+                }
+                if (jDto.motor != null) {
+                    joint.setPin(jDto.motor.pin);
+                    joint.setInverted(jDto.motor.inverted);
+                    joint.setZeroOffsetDeg(jDto.motor.zeroOffsetDeg);
+                    if (jDto.motor.acceleration > 0) {
+                        joint.setAcceleration(jDto.motor.acceleration);
+                    }
+                    if (jDto.motor.speedRatio > 0) {
+                        joint.setTargetSpeedRatio(jDto.motor.speedRatio);
+                    }
+                    if (jDto.motor.type != null && !jDto.motor.type.isEmpty()) {
+                        joint.setMotorType(jDto.motor.type);
+                    }
                 }
                 result.joints.add(joint);
             }

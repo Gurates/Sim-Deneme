@@ -199,17 +199,6 @@ public class ToolbarPanel {
         ImGui.textDisabled("|");
         ImGui.sameLine();
 
-        SceneNode selected = selectionManager != null ? selectionManager.getSelected() : null;
-        boolean canDelete = selected != null && selected.getParent() != null;
-
-        ImGui.beginDisabled(!canDelete);
-        if (ImGui.button("Delete", 60.0f, 24.0f)) {
-            if (selected != null) {
-                engine.deleteNode(selected);
-            }
-        }
-        ImGui.endDisabled();
-
         MotionPlayer motionPlayer = engine.getMotionPlayer();
         boolean hasSequence = (motionPlayer != null && motionPlayer.hasSequence());
 

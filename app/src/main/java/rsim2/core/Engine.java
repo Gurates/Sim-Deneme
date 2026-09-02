@@ -175,7 +175,8 @@ public class Engine {
 
         collisionPanel = new CollisionPanel(this, rootNode, joints, selectionManager, collisionWorld);
         aiPanel = new AIPanel(this, rootNode, selectionManager, joints, motionPlayer);
-        bridgePanel = new BridgePanel(motionPlayer);
+        bridgePanel = new BridgePanel(motionPlayer, joints);
+        rsim2.bridge.BridgeManager.getInstance().registerJoints(joints);
         toolbarPanel = new ToolbarPanel(this, rootNode, selectionManager, commandHistory, aiPanel, bridgePanel, collisionPanel);
         hierarchyPanel = new HierarchyPanel(rootNode, selectionManager);
         allJointsPanel = new AllJointsPanel(this, rootNode, joints, commandHistory);
@@ -228,6 +229,10 @@ public class Engine {
                 collisionPanel.setRootNode(this.rootNode);
                 collisionPanel.setJoints(this.joints);
             }
+            if (bridgePanel != null) {
+                bridgePanel.setJoints(this.joints);
+            }
+            rsim2.bridge.BridgeManager.getInstance().registerJoints(this.joints);
             if (collisionWorld != null) {
                 collisionWorld.getFilter().clearIgnoredPairs();
                 collisionWorld.getFilter().computeAutoAcm(this.rootNode, this.joints, collisionWorld);
@@ -295,6 +300,10 @@ public class Engine {
                 collisionPanel.setRootNode(this.rootNode);
                 collisionPanel.setJoints(this.joints);
             }
+            if (bridgePanel != null) {
+                bridgePanel.setJoints(this.joints);
+            }
+            rsim2.bridge.BridgeManager.getInstance().registerJoints(this.joints);
             if (collisionWorld != null) {
                 collisionWorld.getFilter().clearIgnoredPairs();
                 if (res.disabledCollisionPairs != null) {

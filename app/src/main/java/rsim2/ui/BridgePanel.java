@@ -31,6 +31,7 @@ public class BridgePanel {
 
     private final BridgeManager bridgeManager = BridgeManager.getInstance();
     private final MotionPlayer motionPlayer;
+    private List<rsim2.scene.Joint> joints;
 
     private final ImString hostInput = new ImString("192.168.1.50", 128);
     private final ImInt portInput = new ImInt(8888);
@@ -38,11 +39,21 @@ public class BridgePanel {
     private final ImInt publishRateHz = new ImInt(50);
     private final ImBoolean enforceServo0To180 = new ImBoolean(false);
     private final ImBoolean liveSyncToggle = new ImBoolean(false);
+    private final ImBoolean digitalTwinToggle = new ImBoolean(false);
 
     private String statusMessage = "Bridge ready. Select protocol and click Connect.";
 
     public BridgePanel(MotionPlayer motionPlayer) {
+        this(motionPlayer, null);
+    }
+
+    public BridgePanel(MotionPlayer motionPlayer, List<rsim2.scene.Joint> joints) {
         this.motionPlayer = motionPlayer;
+        this.joints = joints;
+    }
+
+    public void setJoints(List<rsim2.scene.Joint> joints) {
+        this.joints = joints;
     }
 
     public boolean isVisible() {
@@ -138,6 +149,14 @@ public class BridgePanel {
             bridgeManager.setLiveSyncEnabled(liveSyncToggle.get());
         }
 
+        digitalTwinToggle.set(bridgeManager.isDigitalTwinEnabled());
+        if (ImGui.checkbox("Digital Twin (Mirror Real Robot Inbound Telemetry)", digitalTwinToggle)) {
+            bridgeManager.setDigitalTwinEnabled(digitalTwinToggle.get());
+        }
+        if (ImGui.isItemHovered()) {
+            ImGui.setTooltip("When active, robot joint angles received over UDP will update the 3D model in real time.");
+        }
+
         publishRateHz.set(bridgeManager.getTargetPublishRateHz());
         if (ImGui.sliderInt("Stream Rate (Hz)", publishRateHz.getData(), 10, 200)) {
             bridgeManager.setTargetPublishRateHz(publishRateHz.get());
@@ -184,6 +203,13 @@ public class BridgePanel {
         if (ImGui.checkbox("Map to 0..180 deg (Standard Servos)", enforceServo0To180)) {
             safety.setEnforceServo0To180(enforceServo0To180.get());
         }
+
+        ImGui.spacing();
+        if (safety.isCollisionStopActive()) {
+            ImGui.textColored(1.0f, 0.25f, 0.25f, 1.0f, "[⚠️ COLLISION STOP ACTIVE — Hardware Stream Blocked]");
+        } else {
+            ImGui.textColored(0.2f, 0.85f, 0.35f, 1.0f, "[✓ Collision Clear]");
+        }
     }
 
     private void renderTelemetrySection() {
@@ -229,13 +255,28 @@ public class BridgePanel {
 
         ImGui.text("Active Motion: " + seq.getName() + " (" + seq.getDurationSeconds() + "s)");
 
-        if (ImGui.button("Export to Arduino C++ Header (.h)", 220.0f, 26.0f)) {
-            exportTrajectory("h", "Arduino C++ Header (*.h)", TrajectoryExporter.toArduinoHeader(seq, publishRateHz.get()));
+        if (ImGui.button("Export Full Arduino Sketch (.ino)", 230.0f, 26.0f)) {
+            exportTrajectory("ino", "Arduino Sketch (*.ino)", TrajectoryExporter.toArduinoSketch(seq, joints, publishRateHz.get()));
         }
 
         ImGui.sameLine();
-        if (ImGui.button("Export to CSV (.csv)", 160.0f, 26.0f)) {
+        if (ImGui.button("Export to Header (.h)", 160.0f, 26.0f)) {
+            exportTrajectory("h", "Arduino C++ Header (*.h)", TrajectoryExporter.toArduinoHeader(seq, joints, publishRateHz.get()));
+        }
+
+        ImGui.sameLine();
+        if (ImGui.button("Export to CSV (.csv)", 150.0f, 26.0f)) {
             exportTrajectory("csv", "CSV Trajectory (*.csv)", TrajectoryExporter.toCsv(seq, publishRateHz.get()));
+        }
+
+        ImGui.spacing();
+        if (ImGui.button("Export Raspberry Pi Python (.py)", 230.0f, 26.0f)) {
+            exportTrajectory("py", "Raspberry Pi Python Script (*.py)", TrajectoryExporter.toPythonScript(seq, joints, publishRateHz.get()));
+        }
+
+        ImGui.sameLine();
+        if (ImGui.button("Export RPi Live Receiver Agent (.py)", 260.0f, 26.0f)) {
+            exportTrajectory("py", "Raspberry Pi Receiver Script (*.py)", TrajectoryExporter.toRpiLiveReceiverScript());
         }
     }
 

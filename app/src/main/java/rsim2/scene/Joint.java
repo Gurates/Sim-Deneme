@@ -14,6 +14,11 @@ public class Joint {
     private float maxSpeed;
     private MotorController motor;
 
+    private int pin = -1;
+    private boolean inverted = false;
+    private float zeroOffsetDeg = 0.0f;
+    private String motorType = "SERVO_PWM";
+
     public Joint(String id, SceneNode parentNode, SceneNode childNode, Vector3f axis) {
         this(id, parentNode, childNode, JointType.REVOLUTE, axis, -(float) Math.PI, (float) Math.PI, 2.0f);
     }
@@ -114,4 +119,57 @@ public class Joint {
     public void setMotor(MotorController motor) {
         this.motor = motor;
     }
+
+    public int getPin() {
+        return pin;
+    }
+
+    public void setPin(int pin) {
+        this.pin = pin;
+    }
+
+    public boolean isInverted() {
+        return inverted;
+    }
+
+    public void setInverted(boolean inverted) {
+        this.inverted = inverted;
+    }
+
+    public float getZeroOffsetDeg() {
+        return zeroOffsetDeg;
+    }
+
+    public void setZeroOffsetDeg(float zeroOffsetDeg) {
+        this.zeroOffsetDeg = zeroOffsetDeg;
+    }
+
+    public String getMotorType() {
+        return motorType;
+    }
+
+    public void setMotorType(String motorType) {
+        this.motorType = motorType != null ? motorType : "SERVO_PWM";
+    }
+
+    public float getAcceleration() {
+        return motor != null ? motor.getAcceleration() : 8.0f;
+    }
+
+    public void setAcceleration(float acceleration) {
+        if (motor != null) {
+            motor.setAcceleration(acceleration);
+        }
+    }
+
+    public float getTargetSpeedRatio() {
+        return motor != null ? motor.getTargetSpeedRatio() : 1.0f;
+    }
+
+    public void setTargetSpeedRatio(float targetSpeedRatio) {
+        if (motor != null) {
+            motor.setTargetSpeedRatio(targetSpeedRatio);
+        }
+    }
 }
+

@@ -4,6 +4,11 @@ import java.util.Map;
 
 public interface RobotBridge {
 
+    @FunctionalInterface
+    interface TelemetryListener {
+        void onJointAnglesReceived(Map<String, Float> jointAnglesDegrees);
+    }
+
     String getName();
 
     boolean connect(String targetAddress, int portOrBaud);
@@ -17,4 +22,11 @@ public interface RobotBridge {
     void sendEmergencyStop();
 
     BridgeStats getStats();
+
+    default void setTelemetryListener(TelemetryListener listener) {}
+
+    default boolean isListening() {
+        return false;
+    }
 }
+
