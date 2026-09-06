@@ -185,11 +185,21 @@ public class InspectorPanel {
             if (ImGui.inputFloat("##scale", valScale, 0.05f, 0.5f, "%.3f")) {
                 float newScale = Math.max(0.001f, valScale.get());
                 targetNode.getLocalScale().set(newScale, newScale, newScale);
+                if (engine != null && engine.getCollisionWorld() != null) {
+                    engine.getCollisionWorld().update(this.rootNode, this.joints);
+                    rsim2.io.DefaultPlace.run(targetNode, engine.getCollisionWorld());
+                    engine.getCollisionWorld().update(this.rootNode, this.joints);
+                }
             }
 
             ImGui.spacing();
             if (ImGui.button("Reset Scale", -1.0f, 26.0f)) {
                 targetNode.getLocalScale().set(1.0f, 1.0f, 1.0f);
+                if (engine != null && engine.getCollisionWorld() != null) {
+                    engine.getCollisionWorld().update(this.rootNode, this.joints);
+                    rsim2.io.DefaultPlace.run(targetNode, engine.getCollisionWorld());
+                    engine.getCollisionWorld().update(this.rootNode, this.joints);
+                }
             }
         }
 

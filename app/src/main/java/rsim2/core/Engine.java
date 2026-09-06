@@ -236,6 +236,9 @@ public class Engine {
             if (collisionWorld != null) {
                 collisionWorld.getFilter().clearIgnoredPairs();
                 collisionWorld.getFilter().computeAutoAcm(this.rootNode, this.joints, collisionWorld);
+                collisionWorld.update(this.rootNode, this.joints);
+                rsim2.io.DefaultPlace.setRootNode(res.rootNode != null ? res.rootNode : this.rootNode);
+                rsim2.io.DefaultPlace.run(this.collisionWorld);
             }
             if (motionPlayer != null) {
                 motionPlayer.stop();
@@ -310,6 +313,9 @@ public class Engine {
                     collisionWorld.getFilter().loadDisabledPairs(res.disabledCollisionPairs);
                 }
                 collisionWorld.getFilter().computeAutoAcm(this.rootNode, this.joints, collisionWorld);
+                collisionWorld.update(this.rootNode, this.joints);
+                rsim2.io.DefaultPlace.setRootNode(res.rootNode != null ? res.rootNode : this.rootNode);
+                rsim2.io.DefaultPlace.run(this.collisionWorld);
             }
             if (motionPlayer != null) {
                 motionPlayer.stop();
