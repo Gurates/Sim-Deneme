@@ -46,7 +46,7 @@ public class HierarchyPanel {
     private void renderNode(SceneNode node) {
         if (node == null) return;
 
-        int nodeFlags = ImGuiTreeNodeFlags.OpenOnArrow | ImGuiTreeNodeFlags.OpenOnDoubleClick;
+        int nodeFlags = ImGuiTreeNodeFlags.OpenOnArrow | ImGuiTreeNodeFlags.OpenOnDoubleClick | ImGuiTreeNodeFlags.DefaultOpen;
         if (selectionManager != null && selectionManager.getSelected() == node) {
             nodeFlags |= ImGuiTreeNodeFlags.Selected;
         }

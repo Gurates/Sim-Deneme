@@ -85,7 +85,7 @@ public class AIPanel {
 
         syncModelIndexFromConfig();
 
-        chatHistory.add(new ChatMessage("AI", "Hello! I am your Robot AI Assistant. You can ask me to generate motion trajectories (e.g., 'wave hand', 'bend elbow 45 degrees'), analyze kinematics, or explain robot properties.", false));
+        //chatHistory.add(new ChatMessage("AI", "Hello.", false));
 
         if (config.getActiveApiKey().isEmpty()) {
             chatHistory.add(new ChatMessage("System", "No API Key entered yet. Please click the 'Settings' button above to configure your Google Gemini or OpenAI API key.", false));
