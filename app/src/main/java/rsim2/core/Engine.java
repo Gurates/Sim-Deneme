@@ -2,10 +2,14 @@ package rsim2.core;
 
 import imgui.ImGui;
 import org.joml.Vector3f;
+import org.lwjgl.BufferUtils;
 import org.lwjgl.glfw.GLFWErrorCallback;
+import org.lwjgl.glfw.GLFWImage;
+import org.lwjgl.glfw.GLFWNativeWin32;
 import org.lwjgl.glfw.GLFWVidMode;
 import org.lwjgl.opengl.GL;
 import org.lwjgl.system.MemoryStack;
+import org.lwjgl.system.windows.User32;
 import rsim2.camera.Camera;
 import rsim2.collision.CollisionResult;
 import rsim2.collision.CollisionWorld;
@@ -24,7 +28,13 @@ import rsim2.scene.Joint;
 import rsim2.scene.SceneNode;
 import rsim2.ui.*;
 
+import javax.imageio.ImageIO;
+import java.awt.Graphics2D;
+import java.awt.RenderingHints;
+import java.awt.image.BufferedImage;
 import java.io.File;
+import java.io.InputStream;
+import java.nio.ByteBuffer;
 import java.nio.IntBuffer;
 import java.util.ArrayList;
 import java.util.HashSet;
@@ -42,7 +52,7 @@ public class Engine {
     private long window;
     private int width = 1280;
     private int height = 720;
-    private String title = "RSim2";
+    private String title = "RSim";
 
     private Input input;
     private Renderer renderer;
@@ -84,6 +94,7 @@ public class Engine {
     }
 
     private void init() {
+        rsim2.App.initWindowsAppId();
         GLFWErrorCallback.createPrint(System.err).set();
 
         if (!glfwInit()) {
@@ -137,6 +148,7 @@ public class Engine {
         glfwMakeContextCurrent(window);
         glfwSwapInterval(0);
         glfwShowWindow(window);
+        setWindowIcon();
 
         GL.createCapabilities();
         glClearColor(0.12f, 0.12f, 0.14f, 1.0f);
@@ -236,9 +248,6 @@ public class Engine {
             if (collisionWorld != null) {
                 collisionWorld.getFilter().clearIgnoredPairs();
                 collisionWorld.getFilter().computeAutoAcm(this.rootNode, this.joints, collisionWorld);
-                collisionWorld.update(this.rootNode, this.joints);
-                rsim2.io.DefaultPlace.setRootNode(res.rootNode != null ? res.rootNode : this.rootNode);
-                rsim2.io.DefaultPlace.run(this.collisionWorld);
             }
             if (motionPlayer != null) {
                 motionPlayer.stop();
@@ -313,9 +322,6 @@ public class Engine {
                     collisionWorld.getFilter().loadDisabledPairs(res.disabledCollisionPairs);
                 }
                 collisionWorld.getFilter().computeAutoAcm(this.rootNode, this.joints, collisionWorld);
-                collisionWorld.update(this.rootNode, this.joints);
-                rsim2.io.DefaultPlace.setRootNode(res.rootNode != null ? res.rootNode : this.rootNode);
-                rsim2.io.DefaultPlace.run(this.collisionWorld);
             }
             if (motionPlayer != null) {
                 motionPlayer.stop();
@@ -622,5 +628,125 @@ public class Engine {
         if (callback != null) {
             callback.free();
         }
+    }
+
+    private void setWindowIcon() {
+        try {
+            BufferedImage image = null;
+
+            String[] resourcePaths = {
+                "/icon/logo.jpg",
+                "/icon/logo.png",
+                "/icons/logo.jpg",
+                "/icons/logo.png",
+                "/logo.jpg",
+                "/logo.png"
+            };
+
+            for (String resPath : resourcePaths) {
+                InputStream is = getClass().getResourceAsStream(resPath);
+                if (is != null) {
+                    try (InputStream in = is) {
+                        image = ImageIO.read(in);
+                        if (image != null) break;
+                    }
+                }
+            }
+
+            if (image == null) {
+                File[] fileCandidates = {
+                    new File("icon/logo.jpg"),
+                    new File("icon/logo.png"),
+                    new File("app/src/main/resources/icon/logo.jpg"),
+                    new File("app/src/main/resources/icon/logo.png"),
+                    new File("../icon/logo.jpg"),
+                    new File("logo.jpg"),
+                    new File("logo.png")
+                };
+
+                for (File file : fileCandidates) {
+                    if (file.exists() && file.isFile()) {
+                        image = ImageIO.read(file);
+                        if (image != null) break;
+                    }
+                }
+            }
+
+            if (image == null) {
+                System.err.println("[Engine] Window icon could not be found.");
+                return;
+            }
+
+            int[] iconSizes = {16, 24, 32, 48, 64, 128, 256};
+            GLFWImage.Buffer iconBuffer = GLFWImage.malloc(iconSizes.length);
+
+            for (int i = 0; i < iconSizes.length; i++) {
+                int size = iconSizes[i];
+                BufferedImage resized = resizeImage(image, size, size);
+                ByteBuffer pixels = convertImageData(resized);
+                iconBuffer.get(i).set(size, size, pixels);
+            }
+
+            glfwSetWindowIcon(window, iconBuffer);
+            iconBuffer.free();
+
+            // Windows 11 Görev Çubuğu pencere sınıfı (WNDCLASS) ikonunu okur
+            String os = System.getProperty("os.name").toLowerCase();
+            if (os.contains("win")) {
+                try {
+                    long hwnd = GLFWNativeWin32.glfwGetWin32Window(window);
+                    if (hwnd != 0) {
+                        long hIconBig = User32.DefWindowProc(hwnd, 0x007F /* WM_GETICON */, 1 /* ICON_BIG */, 0);
+                        long hIconSmall = User32.DefWindowProc(hwnd, 0x007F /* WM_GETICON */, 0 /* ICON_SMALL */, 0);
+                        if (hIconBig != 0) {
+                            User32.SetClassLongPtr(hwnd, -14 /* GCLP_HICON */, hIconBig);
+                            User32.SendMessage(hwnd, 0x0080 /* WM_SETICON */, 1L, hIconBig);
+                        }
+                        if (hIconSmall != 0) {
+                            User32.SetClassLongPtr(hwnd, -34 /* GCLP_HICONSM */, hIconSmall);
+                            User32.SendMessage(hwnd, 0x0080 /* WM_SETICON */, 0L, hIconSmall);
+                        }
+                    }
+                } catch (Throwable t) {
+                    System.err.println("[Engine] Could not update Win32 class icons: " + t.getMessage());
+                }
+            }
+
+            System.out.println("[Engine] Window icon set successfully.");
+        } catch (Exception e) {
+            System.err.println("[Engine] Failed to set window icon: " + e.getMessage());
+            e.printStackTrace();
+        }
+    }
+
+    private BufferedImage resizeImage(BufferedImage original, int targetWidth, int targetHeight) {
+        BufferedImage resized = new BufferedImage(targetWidth, targetHeight, BufferedImage.TYPE_INT_ARGB);
+        Graphics2D g2d = resized.createGraphics();
+        g2d.setRenderingHint(RenderingHints.KEY_INTERPOLATION, RenderingHints.VALUE_INTERPOLATION_BILINEAR);
+        g2d.setRenderingHint(RenderingHints.KEY_RENDERING, RenderingHints.VALUE_RENDER_QUALITY);
+        g2d.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
+        g2d.drawImage(original, 0, 0, targetWidth, targetHeight, null);
+        g2d.dispose();
+        return resized;
+    }
+
+    private ByteBuffer convertImageData(BufferedImage image) {
+        int width = image.getWidth();
+        int height = image.getHeight();
+        int[] pixels = new int[width * height];
+        image.getRGB(0, 0, width, height, pixels, 0, width);
+
+        ByteBuffer buffer = BufferUtils.createByteBuffer(width * height * 4);
+        for (int y = 0; y < height; y++) {
+            for (int x = 0; x < width; x++) {
+                int pixel = pixels[y * width + x];
+                buffer.put((byte) ((pixel >> 16) & 0xFF));
+                buffer.put((byte) ((pixel >> 8) & 0xFF));
+                buffer.put((byte) (pixel & 0xFF));
+                buffer.put((byte) ((pixel >> 24) & 0xFF));
+            }
+        }
+        buffer.flip();
+        return buffer;
     }
 }

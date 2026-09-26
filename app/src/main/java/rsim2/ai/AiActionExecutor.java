@@ -43,11 +43,17 @@ public class AiActionExecutor {
             matchedBlock = matcher.group(0);
             jsonContent = matcher.group(1);
         } else {
-            int startIdx = rawResponse.indexOf("{\"animation\"");
-            if (startIdx == -1) startIdx = rawResponse.indexOf("{\n  \"animation\"");
-            if (startIdx == -1) startIdx = rawResponse.indexOf("{\"trajectory\"");
-            if (startIdx == -1) startIdx = rawResponse.indexOf("{\"actions\"");
-            if (startIdx == -1) startIdx = rawResponse.indexOf("{\n  \"actions\"");
+            int startIdx = -1;
+            String[] targetKeys = { "{\"pose\"", "{\n  \"pose\"", "{\"actions\"", "{\n  \"actions\"",
+                    "{\"animation\"", "{\n  \"animation\"", "{\"trajectory\"", "{\n  \"trajectory\"",
+                    "{\"system\"", "{\n  \"system\"" };
+
+            for (String key : targetKeys) {
+                int idx = rawResponse.indexOf(key);
+                if (idx != -1 && (startIdx == -1 || idx < startIdx)) {
+                    startIdx = idx;
+                }
+            }
 
             if (startIdx != -1) {
                 int endIdx = rawResponse.lastIndexOf("}");
@@ -61,6 +67,27 @@ public class AiActionExecutor {
         if (jsonContent != null) {
             try {
                 JsonObject obj = JsonParser.parseString(jsonContent).getAsJsonObject();
+
+                if (obj.has("pose") && joints != null) {
+                    String pose = obj.get("pose").getAsString().trim().toLowerCase();
+                    executePose(pose, joints, result);
+                }
+
+                if (obj.has("system") && obj.get("system").isJsonObject()) {
+                    JsonObject sys = obj.getAsJsonObject("system");
+                    if (sys.has("estop")) {
+                        boolean estop = sys.get("estop").getAsBoolean();
+                        if (estop) {
+                            rsim2.bridge.BridgeManager.getInstance().triggerEmergencyStop();
+                            result.appliedActions.add("[Safety] Hardware EMERGENCY STOP (E-STOP) triggered.");
+                            result.hasActions = true;
+                        } else {
+                            rsim2.bridge.BridgeManager.getInstance().resetEmergencyStop();
+                            result.appliedActions.add("[Safety] Hardware EMERGENCY STOP reset.");
+                            result.hasActions = true;
+                        }
+                    }
+                }
 
                 JsonObject animObj = null;
                 if (obj.has("animation") && obj.get("animation").isJsonObject()) {
@@ -82,18 +109,9 @@ public class AiActionExecutor {
                             motionPlayer.play();
                         }
 
-                        String clean = (matchedBlock != null) ? rawResponse.replace(matchedBlock, "").trim() : rawResponse;
-                        StringBuilder sb = new StringBuilder(clean);
-                        if (sb.length() > 0) {
-                            sb.append("\n\n");
-                        }
-                        sb.append(String.format("[Motion Loaded]: \"%s\"\n", seq.getName()));
-                        sb.append(String.format("  - Duration: %.2f seconds\n", seq.getDurationSeconds()));
-                        sb.append(String.format("  - Keyframes: %d\n", seq.getKeyframes().size()));
-                        sb.append(String.format("  - Loop: %s\n", seq.isLoop() ? "Enabled" : "Disabled"));
-                        sb.append("  - Playback loaded. You can control it using the [Play / Pause] buttons on the top bar.");
-                        result.cleanedMessage = sb.toString().trim();
-                        return result;
+                        result.appliedActions.add(String.format("[Motion Loaded] \"%s\" (%.2fs, %d keyframes, Loop=%s)",
+                                seq.getName(), seq.getDurationSeconds(), seq.getKeyframes().size(), seq.isLoop() ? "Enabled" : "Disabled"));
+                        result.hasActions = true;
                     }
                 }
 
@@ -105,20 +123,21 @@ public class AiActionExecutor {
                             executeSingleAction(act, joints, result);
                         }
                     }
+                }
 
-                    if (!result.appliedActions.isEmpty()) {
-                        result.hasActions = true;
-                        String clean = (matchedBlock != null) ? rawResponse.replace(matchedBlock, "").trim() : rawResponse;
-                        StringBuilder sb = new StringBuilder(clean);
-                        if (sb.length() > 0) {
-                            sb.append("\n\n");
-                        }
-                        sb.append("[Robot Movement]:\n");
-                        for (String msg : result.appliedActions) {
-                            sb.append("  - ").append(msg).append("\n");
-                        }
-                        result.cleanedMessage = sb.toString().trim();
+                if (!result.appliedActions.isEmpty()) {
+                    result.hasActions = true;
+                    String clean = (matchedBlock != null) ? rawResponse.replace(matchedBlock, "").trim() : rawResponse;
+                    StringBuilder sb = new StringBuilder(clean);
+                    if (sb.length() > 0) {
+                        sb.append("\n\n");
                     }
+                    sb.append("📋 [Executed Actions]:\n");
+                    for (String msg : result.appliedActions) {
+                        sb.append("  • ").append(msg).append("\n");
+                    }
+                    result.cleanedMessage = sb.toString().trim();
+                    return result;
                 }
 
             } catch (Exception e) {
@@ -127,6 +146,35 @@ public class AiActionExecutor {
         }
 
         return result;
+    }
+
+    private static void executePose(String pose, List<Joint> joints, ExecutionResult result) {
+        if ("home".equals(pose) || "zero".equals(pose)) {
+            for (Joint j : joints) {
+                float targetRad = 0.0f;
+                float clampedRad = Math.max(j.getMinLimit(), Math.min(j.getMaxLimit(), targetRad));
+                if (j.getMotor() != null) {
+                    j.getMotor().setTargetAngleRadians(clampedRad);
+                } else {
+                    j.setAngle(clampedRad);
+                }
+            }
+            result.appliedActions.add("[Pose] All joints reset to HOME (0.0°) position.");
+            result.hasActions = true;
+        } else if ("rest".equals(pose)) {
+            for (Joint j : joints) {
+                float targetRad = (j.getMinLimit() + j.getMaxLimit()) * 0.5f;
+                if (j.getMotor() != null) {
+                    j.getMotor().setTargetAngleRadians(targetRad);
+                } else {
+                    j.setAngle(targetRad);
+                }
+            }
+            result.appliedActions.add("[Pose] Robot moved to safe REST configuration.");
+            result.hasActions = true;
+        } else {
+            result.appliedActions.add("[Pose] Unknown pose requested: " + pose);
+        }
     }
 
     private static MotionSequence parseAnimationSequence(JsonObject animObj, List<Joint> joints) {
@@ -242,9 +290,9 @@ public class AiActionExecutor {
             j.setAngle(clampedRad);
         }
 
-        StringBuilder sb = new StringBuilder(String.format("%s: %.1f deg", j.getId(), clampedDeg));
+        StringBuilder sb = new StringBuilder(String.format("%s: %.1f°", j.getId(), clampedDeg));
         if (Math.abs(clampedDeg - deg) > 0.01f) {
-            sb.append(String.format(" (Clamped by limit from %.1f deg)", deg));
+            sb.append(String.format(" (clamped by limit from %.1f°)", deg));
         }
         if (speedRatio != null) {
             sb.append(String.format(" @ %.0f%% speed", speedRatio * 100.0f));

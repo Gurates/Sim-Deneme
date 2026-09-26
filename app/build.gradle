@@ -90,3 +90,11 @@ tasks.register('testCollision', JavaExec) {
     mainClass = 'rsim2.CollisionDetectionTest'
     workingDir = rootProject.projectDir
 }
+
+tasks.register('testAiInteraction', JavaExec) {
+    group = 'verification'
+    description = 'Runs the AiInteractionTest suite'
+    classpath = sourceSets.test.runtimeClasspath
+    mainClass = 'rsim2.AiInteractionTest'
+    workingDir = rootProject.projectDir
+}

@@ -12,6 +12,8 @@ import imgui.type.ImString;
 import rsim2.ai.AiActionExecutor;
 import rsim2.ai.AiConfig;
 import rsim2.ai.AiService;
+import rsim2.ai.RobotContextBuilder;
+import rsim2.collision.CollisionWorld;
 import rsim2.core.Engine;
 import rsim2.editor.SelectionManager;
 import rsim2.motion.MotionPlayer;
@@ -34,6 +36,7 @@ public class AIPanel {
     private SelectionManager selectionManager;
     private List<Joint> joints;
     private MotionPlayer motionPlayer;
+    private CollisionWorld collisionWorld;
 
     private final AiConfig config;
     private final AiService aiService;
@@ -70,11 +73,16 @@ public class AIPanel {
     }
 
     public AIPanel(Engine engine, SceneNode rootNode, SelectionManager selectionManager, List<Joint> joints, MotionPlayer motionPlayer) {
+        this(engine, rootNode, selectionManager, joints, motionPlayer, null);
+    }
+
+    public AIPanel(Engine engine, SceneNode rootNode, SelectionManager selectionManager, List<Joint> joints, MotionPlayer motionPlayer, CollisionWorld collisionWorld) {
         this.engine = engine;
         this.rootNode = rootNode;
         this.selectionManager = selectionManager;
         this.joints = joints != null ? joints : new ArrayList<>();
         this.motionPlayer = motionPlayer != null ? motionPlayer : new MotionPlayer();
+        this.collisionWorld = collisionWorld;
 
         this.config = AiConfig.load();
         this.aiService = new AiService();
@@ -85,11 +93,17 @@ public class AIPanel {
 
         syncModelIndexFromConfig();
 
-        //chatHistory.add(new ChatMessage("AI", "Hello.", false));
-
         if (config.getActiveApiKey().isEmpty()) {
             chatHistory.add(new ChatMessage("System", "No API Key entered yet. Please click the 'Settings' button above to configure your Google Gemini or OpenAI API key.", false));
         }
+    }
+
+    public void setCollisionWorld(CollisionWorld collisionWorld) {
+        this.collisionWorld = collisionWorld;
+    }
+
+    public CollisionWorld getCollisionWorld() {
+        return collisionWorld;
     }
 
     private void syncModelIndexFromConfig() {
@@ -204,21 +218,22 @@ public class AIPanel {
 
             synchronized (chatHistory) {
                 for (ChatMessage msg : chatHistory) {
+                    if (msg == null || msg.text == null) continue;
                     if ("User".equals(msg.sender)) {
                         ImGui.textColored(0.2f, 0.85f, 0.4f, 1.0f, "You:");
                         ImGui.sameLine();
-                        ImGui.textWrapped(msg.text);
+                        renderSafeWrappedText(msg.text);
                     } else if ("System".equals(msg.sender)) {
-                        ImGui.textColored(0.95f, 0.75f, 0.2f, 1.0f, "[Info] " + msg.text);
+                        renderSafeColoredWrappedText(0.95f, 0.75f, 0.2f, 1.0f, "[Info] " + msg.text);
                     } else {
                         if (msg.isError) {
                             ImGui.textColored(1.0f, 0.35f, 0.35f, 1.0f, "[Error]");
                             ImGui.sameLine();
-                            ImGui.textColored(1.0f, 0.4f, 0.4f, 1.0f, msg.text);
+                            renderSafeColoredWrappedText(1.0f, 0.4f, 0.4f, 1.0f, msg.text);
                         } else {
                             ImGui.textColored(0.2f, 0.65f, 1.0f, 1.0f, "AI:");
                             ImGui.sameLine();
-                            ImGui.textWrapped(msg.text);
+                            renderSafeWrappedText(msg.text);
                         }
                     }
                     ImGui.spacing();
@@ -262,6 +277,22 @@ public class AIPanel {
         if (!isOpen.get()) {
             visible = false;
         }
+    }
+
+    private void renderSafeWrappedText(String text) {
+        if (text == null) return;
+        ImGui.pushTextWrapPos(0.0f);
+        ImGui.textUnformatted(text);
+        ImGui.popTextWrapPos();
+    }
+
+    private void renderSafeColoredWrappedText(float r, float g, float b, float a, String text) {
+        if (text == null) return;
+        ImGui.pushStyleColor(ImGuiCol.Text, r, g, b, a);
+        ImGui.pushTextWrapPos(0.0f);
+        ImGui.textUnformatted(text);
+        ImGui.popTextWrapPos();
+        ImGui.popStyleColor();
     }
 
     private void renderSettingsSection() {
@@ -359,79 +390,6 @@ public class AIPanel {
     }
 
     private String buildRobotSystemContext() {
-        StringBuilder sb = new StringBuilder();
-        sb.append("You are an intelligent robotics assistant for the 3D Robot Simulator (RSim2).\n");
-        sb.append("Answer user questions about the robot, perform kinematic analysis, or generate motion sequences.\n\n");
-
-        if (joints != null && !joints.isEmpty()) {
-            sb.append("Currently loaded robot configuration:\n");
-            sb.append("- Total Joints: ").append(joints.size()).append("\n");
-            sb.append("Joints List:\n");
-            for (Joint j : joints) {
-                float deg = (float) Math.toDegrees(j.getCurrentAngleRadians());
-                float minDeg = (float) Math.toDegrees(j.getMinLimit());
-                float maxDeg = (float) Math.toDegrees(j.getMaxLimit());
-                sb.append(String.format(
-                        "  - ID: %s | Type: %s | Parent: %s | Child: %s | Axis: (%.1f, %.1f, %.1f) | Current Angle: %.1f deg | Limits: [%.0f, %.0f]\n",
-                        j.getId(),
-                        j.getType().name(),
-                        j.getParentNode() != null ? j.getParentNode().getId() : "world",
-                        j.getChildNode() != null ? j.getChildNode().getId() : "null",
-                        j.getAxis().x, j.getAxis().y, j.getAxis().z,
-                        deg, minDeg, maxDeg));
-            }
-
-            sb.append("\nTIMED MOTION & TRAJECTORY PROTOCOL (IMPORTANT):\n");
-            sb.append("When the user asks you to perform a movement, animation, gesture, or time-series trajectory (e.g. 'wave hand', 'bow', 'raise arm', 'walk step', etc.), you MUST append the following JSON 'animation' block at the very end of your helpful response:\n");
-            sb.append("```json\n");
-            sb.append("{\n");
-            sb.append("  \"animation\": {\n");
-            sb.append("    \"name\": \"Motion Name\",\n");
-            sb.append("    \"duration\": 2.0,\n");
-            sb.append("    \"loop\": true,\n");
-            sb.append("    \"keyframes\": [\n");
-            sb.append("      {\n");
-            sb.append("        \"time\": 0.0,\n");
-            sb.append("        \"joints\": {\n");
-            sb.append("          \"joint_id_1\": 0.0,\n");
-            sb.append("          \"joint_id_2\": 20.0\n");
-            sb.append("        }\n");
-            sb.append("      },\n");
-            sb.append("      {\n");
-            sb.append("        \"time\": 0.5,\n");
-            sb.append("        \"joints\": {\n");
-            sb.append("          \"joint_id_1\": 35.0,\n");
-            sb.append("          \"joint_id_2\": 40.0\n");
-            sb.append("        }\n");
-            sb.append("      },\n");
-            sb.append("      {\n");
-            sb.append("        \"time\": 1.0,\n");
-            sb.append("        \"joints\": {\n");
-            sb.append("          \"joint_id_1\": -35.0,\n");
-            sb.append("          \"joint_id_2\": 20.0\n");
-            sb.append("        }\n");
-            sb.append("      },\n");
-            sb.append("      {\n");
-            sb.append("        \"time\": 2.0,\n");
-            sb.append("        \"joints\": {\n");
-            sb.append("          \"joint_id_1\": 0.0,\n");
-            sb.append("          \"joint_id_2\": 20.0\n");
-            sb.append("        }\n");
-            sb.append("      }\n");
-            sb.append("    ]\n");
-            sb.append("  }\n");
-            sb.append("}\n");
-            sb.append("```\n");
-            sb.append("Rules:\n");
-            sb.append("1. 'time': Timestamp in seconds starting from 0.0 up to duration.\n");
-            sb.append("2. 'joints': Target angle in degrees for each joint at that timestamp. Simulator smoothly interpolates between keyframes.\n");
-            sb.append("3. 'loop': Set to true for cyclic motions (waving, walking, idle, etc.).\n");
-            sb.append("4. Never exceed joint limits and only use valid joint IDs from the scene.\n");
-            sb.append("5. For instantaneous single-step changes, you can use 'actions' (e.g. {\"actions\": [{\"joint\": \"ALL\", \"target_deg\": 0.0}]}).\n");
-        } else {
-            sb.append("No active robot model is currently loaded in the scene.\n");
-        }
-
-        return sb.toString();
+        return RobotContextBuilder.buildContext(rootNode, joints, collisionWorld, motionPlayer);
     }
 }
