@@ -86,7 +86,7 @@ public class ToolbarPanel {
 
         ImGui.begin("Toolbar", flags);
 
-        if (ImGui.button("Load Project", 90.0f, 24.0f)) {
+        if (ImGui.button("Load Project", 100.0f, 24.0f)) {
             try (MemoryStack stack = stackPush()) {
                 PointerBuffer filters = stack.mallocPointer(1);
                 filters.put(stack.UTF8("*.json"));
@@ -101,7 +101,7 @@ public class ToolbarPanel {
         }
 
         ImGui.sameLine();
-        if (ImGui.button("Save Project", 90.0f, 24.0f)) {
+        if (ImGui.button("Save Project", 100.0f, 24.0f)) {
             String currentPath = engine.getCurrentProjectPath();
             if (currentPath != null && !currentPath.trim().isEmpty()) {
                 engine.saveProject(currentPath);
@@ -111,17 +111,9 @@ public class ToolbarPanel {
         }
 
         ImGui.sameLine();
-        if (ImGui.button("Save As", 65.0f, 24.0f)) {
-            saveProjectAs();
-        }
-
-        ImGui.sameLine();
-        ImGui.textDisabled("|");
-        ImGui.sameLine();
-
         ImGui.pushStyleColor(ImGuiCol.Button, 0.15f, 0.55f, 0.45f, 1.0f);
         ImGui.pushStyleColor(ImGuiCol.ButtonHovered, 0.20f, 0.68f, 0.55f, 1.0f);
-        if (ImGui.button("Import URDF", 90.0f, 24.0f)) {
+        if (ImGui.button("Import Project", 120.0f, 24.0f)) {
             try (MemoryStack stack = stackPush()) {
                 PointerBuffer filters = stack.mallocPointer(2);
                 filters.put(stack.UTF8("*.urdf"));
@@ -138,6 +130,7 @@ public class ToolbarPanel {
         ImGui.popStyleColor(2);
 
         ImGui.sameLine();
+        /*
         if (ImGui.button("Import Model", 90.0f, 24.0f)) {
             ImGui.openPopup("Select Up Axis");
             importTypePending = 0;
@@ -147,12 +140,14 @@ public class ToolbarPanel {
             ImGui.text("What is the Up Axis orientation of the imported model?");
             ImGui.spacing();
 
-            String[] upAxisOptions = { "Y-Up (Blender / OpenGL / Unity)", "Z-Up (ROS / Gazebo / SolidWorks)" };
+            String[] upAxisOptions = { "Y-Up", "Z-Up" };
             ImGui.combo("Up Axis", selectedUpAxisIdx, upAxisOptions);
 
             ImGui.spacing();
             ImGui.separator();
             ImGui.spacing();
+
+        
 
             if (ImGui.button("Import", 100.0f, 26.0f)) {
                 UpAxis upAxis = (selectedUpAxisIdx.get() == 1) ? UpAxis.Z_UP : UpAxis.Y_UP;
@@ -194,10 +189,9 @@ public class ToolbarPanel {
 
             ImGui.endPopup();
         }
+        */
 
-        ImGui.sameLine();
-        ImGui.textDisabled("|");
-        ImGui.sameLine();
+
 
         MotionPlayer motionPlayer = engine.getMotionPlayer();
         boolean hasSequence = (motionPlayer != null && motionPlayer.hasSequence());
@@ -211,8 +205,6 @@ public class ToolbarPanel {
             ImGui.sameLine();
         }
 
-        ImGui.textDisabled("|");
-        ImGui.sameLine();
 
         boolean isPlaying = (motionPlayer != null && motionPlayer.isPlaying());
         if (isPlaying) {
@@ -328,7 +320,7 @@ public class ToolbarPanel {
             ImGui.popStyleColor();
         }
         if (ImGui.isItemHovered()) {
-            ImGui.setTooltip("Sim-to-Real Hardware Bridge: Live ESP32/robot sync & telemetry");
+            ImGui.setTooltip("Sim-to-Real Hardware Bridge");
         }
 
         ImGui.sameLine();
