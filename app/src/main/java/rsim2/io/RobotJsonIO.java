@@ -182,7 +182,7 @@ public class RobotJsonIO {
     }
 
     private static void collectNodes(SceneNode node, List<SceneNode> list) {
-        if (node == null) return;
+        if (node == null || node.isExcludedFromHierarchy()) return;
         list.add(node);
         for (SceneNode child : node.getChildren()) {
             collectNodes(child, list);

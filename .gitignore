@@ -9,3 +9,4 @@ build
 *.ini
 ai_config.json
 features.md
+.lwjgl/

@@ -98,3 +98,11 @@ tasks.register('testAiInteraction', JavaExec) {
     mainClass = 'rsim2.AiInteractionTest'
     workingDir = rootProject.projectDir
 }
+
+tasks.register('testModelImport', JavaExec) {
+    group = 'verification'
+    description = 'Runs the ModelImportScriptTest suite'
+    classpath = sourceSets.test.runtimeClasspath
+    mainClass = 'rsim2.ModelImportScriptTest'
+    workingDir = rootProject.projectDir
+}

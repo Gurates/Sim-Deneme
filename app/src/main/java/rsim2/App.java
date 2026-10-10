@@ -10,12 +10,19 @@ import rsim2.core.Engine;
 import java.nio.ByteBuffer;
 
 public class App {
+    private static volatile boolean appIdInitialized = false;
+
     public static void main(String[] args) {
         initWindowsAppId();
         new Engine().run();
     }
 
-    public static void initWindowsAppId() {
+    public static synchronized void initWindowsAppId() {
+        if (appIdInitialized) {
+            return;
+        }
+        appIdInitialized = true;
+
         if (!System.getProperty("os.name").toLowerCase().contains("win")) {
             return;
         }
@@ -23,7 +30,7 @@ public class App {
             SharedLibrary shell32 = Library.loadNative("rsim2.App", "shell32");
             long func = shell32.getFunctionAddress("SetCurrentProcessExplicitAppUserModelID");
             if (func != 0) {
-                ByteBuffer appID = stack.UTF16("RSim2.Simulator.App." + System.currentTimeMillis());
+                ByteBuffer appID = stack.UTF16("RSim2.Simulator.App");
                 JNI.callPI(MemoryUtil.memAddress(appID), func);
             }
         } catch (Throwable ignored) {

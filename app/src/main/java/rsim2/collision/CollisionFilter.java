@@ -158,6 +158,7 @@ public class CollisionFilter {
     public boolean shouldCheckGround(SceneNode a) {
         if (!enabled || !groundCollisionEnabled || a == null) return false;
         if (a.getMeshes().isEmpty()) return false;
+        if (a.isExcludedFromHierarchy()) return false;
 
         return true;
     }

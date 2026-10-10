@@ -245,4 +245,22 @@ public class SceneNode {
     public boolean hasExplicitCollisionShape() {
         return collisionShape != null;
     }
+
+    private boolean robotPart = true;
+
+    public boolean isRobotPart() {
+        return robotPart;
+    }
+
+    public void setRobotPart(boolean robotPart) {
+        this.robotPart = robotPart;
+    }
+
+    public boolean isExcludedFromHierarchy() {
+        return !robotPart;
+    }
+
+    public void setExcludedFromHierarchy(boolean excludedFromHierarchy) {
+        this.robotPart = !excludedFromHierarchy;
+    }
 }

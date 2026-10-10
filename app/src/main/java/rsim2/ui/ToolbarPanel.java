@@ -12,6 +12,7 @@ import org.lwjgl.PointerBuffer;
 import org.lwjgl.system.MemoryStack;
 import org.lwjgl.util.tinyfd.TinyFileDialogs;
 import rsim2.core.Engine;
+import rsim2.editor.EnvironmentModelImporter;
 import rsim2.editor.ModelImporter;
 import rsim2.editor.SelectionManager;
 import rsim2.editor.UpAxis;
@@ -130,6 +131,15 @@ public class ToolbarPanel {
         ImGui.popStyleColor(2);
 
         ImGui.sameLine();
+
+        // Imprt button (soon)
+        if (ImGui.button("Import Object", 120.0f, 24.0f)) {
+            SceneNode model = EnvironmentModelImporter.importModel();
+        }
+
+        ImGui.sameLine();
+
+
         /*
         if (ImGui.button("Import Model", 90.0f, 24.0f)) {
             ImGui.openPopup("Select Up Axis");
