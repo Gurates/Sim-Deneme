@@ -114,7 +114,6 @@ public class AiActionExecutor {
                         result.hasActions = true;
                     }
                 }
-
                 if (obj.has("actions") && obj.get("actions").isJsonArray() && joints != null) {
                     JsonArray actions = obj.getAsJsonArray("actions");
                     for (JsonElement elem : actions) {
@@ -132,7 +131,7 @@ public class AiActionExecutor {
                     if (sb.length() > 0) {
                         sb.append("\n\n");
                     }
-                    sb.append("📋 [Executed Actions]:\n");
+                    sb.append("[Executed Actions]:\n");
                     for (String msg : result.appliedActions) {
                         sb.append("  • ").append(msg).append("\n");
                     }

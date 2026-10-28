@@ -116,7 +116,6 @@ public class AiInteractionTest {
 
     @Test
     public void testAiActionExecutorPoseHomeAndZero() {
-        // First set non-zero angles
         Joint j1 = testJoints.get(0);
         Joint j2 = testJoints.get(1);
         j1.setAngle((float) Math.toRadians(45.0));
@@ -142,7 +141,6 @@ public class AiInteractionTest {
         assertTrue(res.hasActions);
         assertTrue(BridgeManager.getInstance().getSafetyFilter().isEmergencyStopActive());
 
-        // Reset
         BridgeManager.getInstance().resetEmergencyStop();
     }
 

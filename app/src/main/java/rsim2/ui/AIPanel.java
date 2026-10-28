@@ -201,7 +201,6 @@ public class AIPanel {
             ImGui.sameLine();
             if (ImGui.smallButton("Clear")) {
                 chatHistory.clear();
-                chatHistory.add(new ChatMessage("System", "Chat history cleared.", false));
             }
 
             ImGui.separator();

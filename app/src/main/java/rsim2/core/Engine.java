@@ -125,8 +125,6 @@ public class Engine {
             throw new RuntimeException("Failed to create the GLFW window");
         }
 
-        setWindowIcon();
-
         input = new Input();
         input.init(window);
 
@@ -161,7 +159,7 @@ public class Engine {
         glfwMakeContextCurrent(window);
         glfwSwapInterval(0);
         glfwShowWindow(window);
-        updateWin32TaskbarIcon();
+        setWindowIcon();
 
         GL.createCapabilities();
         glClearColor(0.12f, 0.12f, 0.14f, 1.0f);
@@ -715,21 +713,38 @@ public class Engine {
 
             int[] iconSizes = {16, 24, 32, 48, 64, 128, 256};
             GLFWImage.Buffer iconBuffer = GLFWImage.malloc(iconSizes.length);
-            // Güçlü referans listesi: GC'nin yerel çağrı bitmeden doğrudan arabellekleri silmesini önler
-            List<ByteBuffer> pixelBuffers = new ArrayList<>(iconSizes.length);
 
             for (int i = 0; i < iconSizes.length; i++) {
                 int size = iconSizes[i];
                 BufferedImage resized = resizeImage(image, size, size);
                 ByteBuffer pixels = convertImageData(resized);
-                pixelBuffers.add(pixels);
                 iconBuffer.get(i).set(size, size, pixels);
             }
 
             glfwSetWindowIcon(window, iconBuffer);
             iconBuffer.free();
 
-            updateWin32TaskbarIcon();
+            String os = System.getProperty("os.name").toLowerCase();
+            if (os.contains("win")) {
+                try {
+                    long hwnd = GLFWNativeWin32.glfwGetWin32Window(window);
+                    if (hwnd != 0) {
+                        long hIconBig = User32.DefWindowProc(hwnd, 0x007F, 1, 0);
+                        long hIconSmall = User32.DefWindowProc(hwnd, 0x007F, 0, 0);
+                        if (hIconBig != 0) {
+                            User32.SetClassLongPtr(hwnd, -14, hIconBig);
+                            User32.SendMessage(hwnd, 0x0080, 1L, hIconBig);
+                        }
+                        if (hIconSmall != 0) {
+                            User32.SetClassLongPtr(hwnd, -34, hIconSmall);
+                            User32.SendMessage(hwnd, 0x0080, 0L, hIconSmall);
+                        }
+                    }
+                } catch (Throwable t) {
+                    System.err.println("[Engine] Could not update Win32 class icons: " + t.getMessage());
+                }
+            }
+
             System.out.println("[Engine] Window icon set successfully.");
         } catch (Exception e) {
             System.err.println("[Engine] Failed to set window icon: " + e.getMessage());
@@ -737,63 +752,15 @@ public class Engine {
         }
     }
 
-    private void updateWin32TaskbarIcon() {
-        String os = System.getProperty("os.name").toLowerCase();
-        if (!os.contains("win")) {
-            return;
-        }
-        try {
-            long hwnd = GLFWNativeWin32.glfwGetWin32Window(window);
-            if (hwnd != 0) {
-                long hIconBig = User32.DefWindowProc(hwnd, 0x007F /* WM_GETICON */, 1 /* ICON_BIG */, 0);
-                long hIconSmall = User32.DefWindowProc(hwnd, 0x007F /* WM_GETICON */, 0 /* ICON_SMALL */, 0);
-                if (hIconBig != 0) {
-                    User32.SetClassLongPtr(hwnd, -14 /* GCLP_HICON */, hIconBig);
-                    User32.SendMessage(hwnd, 0x0080 /* WM_SETICON */, 1L, hIconBig);
-                }
-                if (hIconSmall != 0) {
-                    User32.SetClassLongPtr(hwnd, -34 /* GCLP_HICONSM */, hIconSmall);
-                    User32.SendMessage(hwnd, 0x0080 /* WM_SETICON */, 0L, hIconSmall);
-                }
-                // SWP_NOSIZE(1) | SWP_NOMOVE(2) | SWP_NOZORDER(4) | SWP_NOACTIVATE(0x10) | SWP_FRAMECHANGED(0x20)
-                User32.SetWindowPos(hwnd, 0L, 0, 0, 0, 0, 0x0037);
-            }
-        } catch (Throwable t) {
-            System.err.println("[Engine] Could not update Win32 class icons: " + t.getMessage());
-        }
-    }
-
     private BufferedImage resizeImage(BufferedImage original, int targetWidth, int targetHeight) {
-        BufferedImage ret = original;
-        int w = original.getWidth();
-        int h = original.getHeight();
-
-        // Kademeli (progressive) ölçekleme: 2048x2048 gibi büyük görsellerin piksel atlamadan pürüzsüz küçültülmesini sağlar
-        do {
-            if (w > targetWidth) {
-                w = Math.max(targetWidth, w / 2);
-            } else {
-                w = targetWidth;
-            }
-
-            if (h > targetHeight) {
-                h = Math.max(targetHeight, h / 2);
-            } else {
-                h = targetHeight;
-            }
-
-            BufferedImage tmp = new BufferedImage(w, h, BufferedImage.TYPE_INT_ARGB);
-            Graphics2D g2 = tmp.createGraphics();
-            g2.setRenderingHint(RenderingHints.KEY_INTERPOLATION, RenderingHints.VALUE_INTERPOLATION_BICUBIC);
-            g2.setRenderingHint(RenderingHints.KEY_RENDERING, RenderingHints.VALUE_RENDER_QUALITY);
-            g2.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
-            g2.drawImage(ret, 0, 0, w, h, null);
-            g2.dispose();
-
-            ret = tmp;
-        } while (w != targetWidth || h != targetHeight);
-
-        return ret;
+        BufferedImage resized = new BufferedImage(targetWidth, targetHeight, BufferedImage.TYPE_INT_ARGB);
+        Graphics2D g2d = resized.createGraphics();
+        g2d.setRenderingHint(RenderingHints.KEY_INTERPOLATION, RenderingHints.VALUE_INTERPOLATION_BILINEAR);
+        g2d.setRenderingHint(RenderingHints.KEY_RENDERING, RenderingHints.VALUE_RENDER_QUALITY);
+        g2d.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
+        g2d.drawImage(original, 0, 0, targetWidth, targetHeight, null);
+        g2d.dispose();
+        return resized;
     }
 
     private ByteBuffer convertImageData(BufferedImage image) {

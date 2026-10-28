@@ -19,52 +19,18 @@ import java.util.Set;
 
 import static org.lwjgl.system.MemoryStack.stackPush;
 
-/**
- * Script for importing 3D models (.stl and .obj) directly from computer filesystem files.
- *
- * Models imported by this script are marked as non-robot environment/static objects
- * and are explicitly EXCLUDED from HierarchyPanel and robot JSON definition exports.
- *
- * This script provides static functions that can be called directly from outside:
- * - ModelImportScript.importModel()
- * - ModelImportScript.importModel(String filePath)
- * - ModelImportScript.importModel(File file)
- * - ModelImportScript.importModel(SceneNode rootNode)
- * - ModelImportScript.importModel(SceneNode rootNode, String filePath)
- * - ModelImportScript.importModel(SceneNode rootNode, String filePath, UpAxis upAxis)
- */
 public class ModelImportScript {
 
     public static final float DEFAULT_TARGET_SIZE = 2.0f;
 
-    /**
-     * Directly imports a 3D model (.stl or .obj) via file dialog into the current active scene.
-     * The imported model is NOT added to HierarchyPanel.
-     *
-     * @return the created SceneNode, or null if cancelled/failed
-     */
     public static SceneNode importModel() {
         return importModel((SceneNode) null, (String) null, UpAxis.Y_UP);
     }
 
-    /**
-     * Directly imports a 3D model (.stl or .obj) from the given computer file path into the current active scene.
-     * The imported model is NOT added to HierarchyPanel.
-     *
-     * @param filePath absolute or relative path to the .stl or .obj file on the computer
-     * @return the created SceneNode, or null if failed
-     */
     public static SceneNode importModel(String filePath) {
         return importModel((SceneNode) null, filePath, UpAxis.Y_UP);
     }
 
-    /**
-     * Directly imports a 3D model from a File object into the current active scene.
-     * The imported model is NOT added to HierarchyPanel.
-     *
-     * @param file the File pointing to a .stl or .obj file
-     * @return the created SceneNode, or null if failed
-     */
     public static SceneNode importModel(File file) {
         if (file == null) {
             return null;
@@ -72,56 +38,20 @@ public class ModelImportScript {
         return importModel((SceneNode) null, file.getAbsolutePath(), UpAxis.Y_UP);
     }
 
-    /**
-     * Directly imports a 3D model via file dialog and attaches it to the specified root node.
-     * The imported model is NOT added to HierarchyPanel.
-     *
-     * @param root the parent scene node (e.g. world)
-     * @return the created SceneNode, or null if cancelled/failed
-     */
     public static SceneNode importModel(SceneNode root) {
         return importModel(root, (String) null, UpAxis.Y_UP);
     }
 
-    /**
-     * Directly imports a 3D model from the given computer file path and attaches it to the specified root node.
-     * The imported model is NOT added to HierarchyPanel.
-     *
-     * @param root parent scene node (if null, Engine.getInstance().getRootNode() will be used if available)
-     * @param filePath computer file path to .stl or .obj (if null, an open file dialog will prompt user)
-     * @return the created SceneNode, or null if failed
-     */
     public static SceneNode importModel(SceneNode root, String filePath) {
         return importModel(root, filePath, UpAxis.Y_UP);
     }
 
-    /**
-     * Directly imports a 3D model (.stl or .obj) with full configuration.
-     * The imported model is marked as non-robot and is NOT added to HierarchyPanel.
-     *
-     * @param root parent scene node (if null, Engine.getInstance().getRootNode() will be used if available)
-     * @param filePath computer file path to .stl or .obj (if null, opens file dialog)
-     * @param upAxis coordinate up-axis (Y_UP or Z_UP)
-     * @return the created SceneNode, or null if failed
-     */
     public static SceneNode importModel(SceneNode root, String filePath, UpAxis upAxis) {
         return importModel(root, filePath, upAxis, DEFAULT_TARGET_SIZE, true);
     }
 
-    /**
-     * Complete model import implementation.
-     *
-     * @param root parent scene node
-     * @param filePath file path to model (.stl or .obj), or null to prompt file dialog
-     * @param upAxis coordinate orientation
-     * @param targetSize normalized target bounding dimension
-     * @param autoGround whether to adjust vertical position so the model rests on ground (y >= 0)
-     * @return the created SceneNode
-     */
     public static SceneNode importModel(SceneNode root, String filePath, UpAxis upAxis, float targetSize, boolean autoGround) {
         String selectedPath = filePath;
-
-        // If no file path is provided, prompt user with file dialog
         if (selectedPath == null || selectedPath.trim().isEmpty()) {
             selectedPath = openFileDialog();
         }
@@ -133,7 +63,6 @@ public class ModelImportScript {
 
         File file = new File(selectedPath);
         if (!file.exists() || !file.isFile()) {
-            // Also check if accessible via classloader resource as fallback
             if (ModelImportScript.class.getResource(selectedPath.startsWith("/") ? selectedPath : "/" + selectedPath) == null) {
                 System.err.println("[ModelImportScript] Model file not found: " + selectedPath);
                 return null;
@@ -148,7 +77,6 @@ public class ModelImportScript {
             }
             mesh.setSourcePath(selectedPath);
 
-            // Determine unique ID for the scene node
             String baseId = extractBaseId(file.getName());
             Set<String> existingIds = new HashSet<>();
             SceneNode targetRoot = resolveRootNode(root);
@@ -165,11 +93,9 @@ public class ModelImportScript {
             SceneNode newNode = new SceneNode(uniqueId, mesh);
             newNode.setSourceMeshPath(selectedPath);
 
-            // IMPORTANT: Mark as non-robot part so it is excluded from HierarchyPanel and robot exports
             newNode.setRobotPart(false);
             newNode.setExcludedFromHierarchy(true);
 
-            // Scale normalization
             float scaleFactor = 1.0f;
             if (mesh.getMinBound() != null && mesh.getMaxBound() != null) {
                 float sizeX = mesh.getMaxBound().x - mesh.getMinBound().x;
@@ -182,12 +108,10 @@ public class ModelImportScript {
                 newNode.getLocalScale().set(scaleFactor, scaleFactor, scaleFactor);
             }
 
-            // Up-axis alignment
             if (upAxis == UpAxis.Z_UP) {
                 newNode.getLocalRotation().rotateX((float) Math.toRadians(-90));
             }
 
-            // Ground placement: ensure lowest point rests on ground plane (y = 0)
             if (autoGround && mesh.getMinBound() != null) {
                 float minY = mesh.getMinBound().y * scaleFactor;
                 if (minY < 0.0f) {
@@ -195,12 +119,10 @@ public class ModelImportScript {
                 }
             }
 
-            // Attach to root node
             if (targetRoot != null) {
                 targetRoot.addChild(newNode);
             }
 
-            // If engine is active, select node in editor
             Engine engine = Engine.getInstance();
             if (engine != null && engine.getSelectionManager() != null) {
                 engine.getSelectionManager().select(newNode);
@@ -217,9 +139,6 @@ public class ModelImportScript {
         }
     }
 
-    /**
-     * Batch import multiple model files at once into the active scene.
-     */
     public static List<SceneNode> importModels(String... filePaths) {
         List<SceneNode> nodes = new ArrayList<>();
         if (filePaths == null) return nodes;
@@ -233,30 +152,18 @@ public class ModelImportScript {
         return nodes;
     }
 
-    /**
-     * Alias for importModel() with descriptive naming.
-     */
     public static SceneNode importEnvironmentModel() {
         return importModel();
     }
 
-    /**
-     * Alias for importModel(filePath) with descriptive naming.
-     */
     public static SceneNode importEnvironmentModel(String filePath) {
         return importModel(filePath);
     }
 
-    /**
-     * Alias for importModel() with object naming.
-     */
     public static SceneNode importObject() {
         return importModel();
     }
 
-    /**
-     * Alias for importModel(filePath) with object naming.
-     */
     public static SceneNode importObject(String filePath) {
         return importModel(filePath);
     }
@@ -288,7 +195,6 @@ public class ModelImportScript {
         } else if (lower.endsWith(".obj")) {
             return ObjLoader.load(path);
         } else {
-            // Attempt OBJ loader first, fall back to STL loader
             try {
                 return ObjLoader.load(path);
             } catch (Exception ignored) {

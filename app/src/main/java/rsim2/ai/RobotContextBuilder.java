@@ -28,7 +28,6 @@ public class RobotContextBuilder {
         sb.append("=== ROBOT CONFIGURATION & KINEMATICS ===\n");
         sb.append(String.format("Degrees of Freedom (Active Joints): %d\n", joints.size()));
 
-        // Identify Base and End-Effector
         SceneNode baseNode = findBaseNode(joints);
         SceneNode endEffector = findEndEffector(joints);
 

@@ -75,7 +75,6 @@ public class ModelImportScriptTest {
 
     @Test
     public void testImportStlModel() throws IOException {
-        // Create a temporary ASCII STL file
         File tempStl = File.createTempFile("test_model", ".stl");
         tempStl.deleteOnExit();
 
@@ -122,7 +121,6 @@ public class ModelImportScriptTest {
         SceneNode envObject = ModelImportScript.importModel(root, objFile.getAbsolutePath());
         assertNotNull(envObject);
 
-        // Verify that robotLink is part of hierarchy while envObject is excluded
         assertFalse(robotLink.isExcludedFromHierarchy(), "Robot link should be in hierarchy");
         assertTrue(envObject.isExcludedFromHierarchy(), "Environment object must be excluded from hierarchy");
     }

@@ -132,7 +132,6 @@ public class ToolbarPanel {
 
         ImGui.sameLine();
 
-        // Imprt button (soon)
         if (ImGui.button("Import Object", 120.0f, 24.0f)) {
             SceneNode model = EnvironmentModelImporter.importModel();
         }
@@ -140,66 +139,7 @@ public class ToolbarPanel {
         ImGui.sameLine();
 
 
-        /*
-        if (ImGui.button("Import Model", 90.0f, 24.0f)) {
-            ImGui.openPopup("Select Up Axis");
-            importTypePending = 0;
-        }
 
-        if (ImGui.beginPopupModal("Select Up Axis", ImGuiWindowFlags.AlwaysAutoResize)) {
-            ImGui.text("What is the Up Axis orientation of the imported model?");
-            ImGui.spacing();
-
-            String[] upAxisOptions = { "Y-Up", "Z-Up" };
-            ImGui.combo("Up Axis", selectedUpAxisIdx, upAxisOptions);
-
-            ImGui.spacing();
-            ImGui.separator();
-            ImGui.spacing();
-
-        
-
-            if (ImGui.button("Import", 100.0f, 26.0f)) {
-                UpAxis upAxis = (selectedUpAxisIdx.get() == 1) ? UpAxis.Z_UP : UpAxis.Y_UP;
-                ImGui.closeCurrentPopup();
-
-                if (importTypePending == 1) {
-                    try (MemoryStack stack = stackPush()) {
-                        PointerBuffer filters = stack.mallocPointer(2);
-                        filters.put(stack.UTF8("*.urdf"));
-                        filters.put(stack.UTF8("*.xml"));
-                        filters.flip();
-
-                        String path = TinyFileDialogs.tinyfd_openFileDialog("Select URDF / XML Robot File", "", filters,
-                                "URDF / XML Robot Files (*.urdf, *.xml)", false);
-                        if (path != null && !path.trim().isEmpty()) {
-                            engine.loadUrdf(path);
-                        }
-                    }
-                } else {
-                    SceneNode imported = ModelImporter.importModel(null, upAxis);
-                    if (imported != null) {
-                        if (commandHistory != null) {
-                            commandHistory
-                                    .executeAndRecord(new ImportModelCommand(imported, rootNode, selectionManager));
-                        } else {
-                            rootNode.addChild(imported);
-                            if (selectionManager != null) {
-                                selectionManager.select(imported);
-                            }
-                        }
-                    }
-                }
-            }
-
-            ImGui.sameLine();
-            if (ImGui.button("Cancel", 80.0f, 26.0f)) {
-                ImGui.closeCurrentPopup();
-            }
-
-            ImGui.endPopup();
-        }
-        */
 
 
 
@@ -278,6 +218,13 @@ public class ToolbarPanel {
             if (ImGui.isItemHovered()) {
                 ImGui.setTooltip(String.format("Motion: %s (%.2fs / %.2fs)", seq.getName(), curTime, duration));
             }
+        }
+
+        ImGui.sameLine(displayWidth - 500.0f);
+
+
+        if(ImGui.button("Scene Object", 100,24.0f)){
+            
         }
 
         ImGui.sameLine(displayWidth - 335.0f);
