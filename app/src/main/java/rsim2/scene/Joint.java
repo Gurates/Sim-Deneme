@@ -1,5 +1,6 @@
 package rsim2.scene;
 
+import org.joml.Quaternionf;
 import org.joml.Vector3f;
 
 public class Joint {
@@ -8,6 +9,7 @@ public class Joint {
     private SceneNode parentNode;
     private SceneNode childNode;
     private Vector3f axis;
+    private final Quaternionf originRotation;
     private float currentAngleRadians;
     private float minLimit;
     private float maxLimit;
@@ -32,6 +34,7 @@ public class Joint {
         this.type = type != null ? type : JointType.REVOLUTE;
         this.parentNode = parentNode;
         this.childNode = childNode;
+        this.originRotation = childNode != null ? new Quaternionf(childNode.getLocalRotation()) : new Quaternionf();
         this.currentAngleRadians = 0.0f;
         this.minLimit = minLimit;
         this.maxLimit = maxLimit;
@@ -52,7 +55,7 @@ public class Joint {
         }
         this.currentAngleRadians = radians;
         if (childNode != null) {
-            childNode.getLocalRotation().fromAxisAngleRad(axis, radians);
+            childNode.getLocalRotation().set(originRotation).rotateAxis(radians, axis.x, axis.y, axis.z);
         }
     }
 
