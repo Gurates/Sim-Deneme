@@ -173,4 +173,32 @@ public class AiInteractionTest {
         assertEquals(3, res.generatedSequence.getKeyframes().size());
         assertTrue(motionPlayer.isPlaying());
     }
+
+    @Test
+    public void directCommandTakesControlFromLoopingAnimation() {
+        AiActionExecutor.processAndExecute("{\"animation\":{\"duration\":2,\"loop\":true,\"keyframes\":[{\"time\":0,\"joints\":{\"shoulder\":0}}]}}", testJoints, motionPlayer);
+        assertTrue(motionPlayer.isPlaying());
+        AiActionExecutor.processAndExecute("{\"actions\":[{\"joint\":\"shoulder\",\"target_deg\":30}]}", testJoints, motionPlayer);
+        assertFalse(motionPlayer.isPlaying());
+        for (int i = 0; i < 200; i++) testJoints.get(0).getMotor().update(0.01f);
+        assertEquals(30, Math.toDegrees(testJoints.get(0).getCurrentAngleRadians()), 0.1);
+    }
+
+    @Test
+    public void nonExecutableResponseIsReported() {
+        var result = AiActionExecutor.processAndExecute("Moving now.", testJoints, motionPlayer);
+        assertFalse(result.hasActions);
+        assertTrue(result.cleanedMessage.contains("No action applied"));
+    }
+
+    @Test
+    public void multipartReplyKeepsExecutableCommand() {
+        var parts = com.google.gson.JsonParser.parseString("[{\"thought\":true,\"text\":\"internal\"},{\"text\":\"Moving.\\n\"},{\"text\":\"{\\\"actions\\\":[{\\\"joint\\\":\\\"shoulder\\\",\\\"target_deg\\\":30}]}\"}]").getAsJsonArray();
+        String reply = rsim2.ai.AiService.collectResponseText(parts);
+        assertFalse(reply.contains("internal"));
+        assertTrue(AiActionExecutor.processAndExecute(reply, testJoints, motionPlayer).hasActions);
+        assertEquals(30, Math.toDegrees(testJoints.get(0).getMotor().getTargetAngleRadians()), 0.01);
+        assertTrue(AiActionExecutor.isMotionRequest("kutuya doğru hareket et ve tut"));
+        assertFalse(AiActionExecutor.isMotionRequest("merhaba"));
+    }
 }

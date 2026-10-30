@@ -119,7 +119,7 @@ public class AiService {
                         if (content.has("parts")) {
                             JsonArray resParts = content.getAsJsonArray("parts");
                             if (resParts.size() > 0) {
-                                String reply = resParts.get(0).getAsJsonObject().get("text").getAsString();
+                                String reply = collectResponseText(resParts);
                                 callback.onSuccess(reply);
                                 return;
                             }
@@ -132,6 +132,17 @@ public class AiService {
         } catch (Exception e) {
             callback.onError("Gemini Connection Error: " + e.getMessage());
         }
+    }
+
+    public static String collectResponseText(JsonArray parts) {
+        StringBuilder text = new StringBuilder();
+        for (var element : parts) {
+            if (!element.isJsonObject()) continue;
+            JsonObject part = element.getAsJsonObject();
+            if (part.has("thought") && part.get("thought").getAsBoolean()) continue;
+            if (part.has("text") && !part.get("text").isJsonNull()) text.append(part.get("text").getAsString());
+        }
+        return text.toString();
     }
 
     private void callOpenAi(AiConfig config, String userPrompt, String systemContext, ResponseCallback callback) {

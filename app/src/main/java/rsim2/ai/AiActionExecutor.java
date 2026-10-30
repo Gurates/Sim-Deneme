@@ -8,6 +8,9 @@ import rsim2.motion.Keyframe;
 import rsim2.motion.MotionPlayer;
 import rsim2.motion.MotionSequence;
 import rsim2.scene.Joint;
+import rsim2.scene.SceneNode;
+import rsim2.scene.ObjectInteractionController;
+import org.joml.Vector3f;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -16,6 +19,9 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 public class AiActionExecutor {
+    public static boolean isMotionRequest(String prompt) {
+        return prompt != null && Pattern.compile("(?iu)\\b(hareket|tut|yakala|kavra|bırak|birak|taşı|tasi|döndür|dondur|kaldır|kaldir|move|grasp|grab|pick|release|rotate|home)\\b").matcher(prompt).find();
+    }
 
     private static final Pattern JSON_BLOCK_PATTERN = Pattern.compile("```(?:json|action)?\\s*(\\{[\\s\\S]*?\\})\\s*```", Pattern.CASE_INSENSITIVE);
 
@@ -28,6 +34,11 @@ public class AiActionExecutor {
     }
 
     public static ExecutionResult processAndExecute(String rawResponse, List<Joint> joints, MotionPlayer motionPlayer) {
+        return processAndExecute(rawResponse, joints, motionPlayer, null, null);
+    }
+
+    public static ExecutionResult processAndExecute(String rawResponse, List<Joint> joints, MotionPlayer motionPlayer,
+                                                   SceneNode root, ObjectInteractionController interactions) {
         ExecutionResult result = new ExecutionResult();
         result.cleanedMessage = rawResponse;
 
@@ -43,17 +54,8 @@ public class AiActionExecutor {
             matchedBlock = matcher.group(0);
             jsonContent = matcher.group(1);
         } else {
-            int startIdx = -1;
-            String[] targetKeys = { "{\"pose\"", "{\n  \"pose\"", "{\"actions\"", "{\n  \"actions\"",
-                    "{\"animation\"", "{\n  \"animation\"", "{\"trajectory\"", "{\n  \"trajectory\"",
-                    "{\"system\"", "{\n  \"system\"" };
-
-            for (String key : targetKeys) {
-                int idx = rawResponse.indexOf(key);
-                if (idx != -1 && (startIdx == -1 || idx < startIdx)) {
-                    startIdx = idx;
-                }
-            }
+            Matcher actionStart = Pattern.compile("\\{\\s*\"(?:pose|actions|animation|trajectory|keyframes|system|interaction)\"\\s*:").matcher(rawResponse);
+            int startIdx = actionStart.find() ? actionStart.start() : -1;
 
             if (startIdx != -1) {
                 int endIdx = rawResponse.lastIndexOf("}");
@@ -68,8 +70,47 @@ public class AiActionExecutor {
             try {
                 JsonObject obj = JsonParser.parseString(jsonContent).getAsJsonObject();
 
+                if (obj.has("interaction")) {
+                    try {
+                        if (interactions == null || root == null) throw new IllegalArgumentException("Scene interaction is unavailable.");
+                        if (obj.size() != 1) throw new IllegalArgumentException("Send object interaction as a standalone command.");
+                        if (rsim2.bridge.BridgeManager.getInstance().getSafetyFilter().isEmergencyStopActive()) {
+                            throw new IllegalArgumentException("Emergency stop is active.");
+                        }
+                        JsonObject action = obj.getAsJsonObject("interaction");
+                        String type = action.get("type").getAsString();
+                        String objectId = action.get("object").getAsString();
+                        String message;
+                        if ("grasp".equals(type)) {
+                            if (motionPlayer != null && motionPlayer.isPlaying()) throw new IllegalArgumentException("Pause the motion player before grasping.");
+                            Vector3f offset = new Vector3f();
+                            if (action.has("tool_offset")) {
+                                JsonArray a = action.getAsJsonArray("tool_offset");
+                                if (a.size() != 3) throw new IllegalArgumentException("tool_offset requires three coordinates.");
+                                offset.set(a.get(0).getAsFloat(), a.get(1).getAsFloat(), a.get(2).getAsFloat());
+                            }
+                            message = interactions.grasp(root, joints, objectId, action.get("tool").getAsString(), offset);
+                        } else if ("release".equals(type)) {
+                            message = interactions.release(root, objectId);
+                        } else throw new IllegalArgumentException("Unknown interaction type: " + type);
+                        result.appliedActions.add("[Interaction] " + message);
+                    } catch (RuntimeException e) {
+                        result.appliedActions.add("[Interaction failed] " + e.getMessage());
+                    }
+                } else if (interactions != null && (obj.has("pose") || obj.has("actions") || obj.has("animation")
+                        || obj.has("trajectory") || obj.has("keyframes") || obj.has("system"))) {
+                    interactions.cancelPending();
+                }
+
+                // Mixed commands are rejected above and must not execute their motion half.
+                if (obj.has("interaction") && obj.size() != 1) {
+                    result.cleanedMessage = "[Interaction failed] Send object interaction as a standalone command.";
+                    return result;
+                }
+
                 if (obj.has("pose") && joints != null) {
                     String pose = obj.get("pose").getAsString().trim().toLowerCase();
+                    if (motionPlayer != null && ("home".equals(pose) || "zero".equals(pose) || "rest".equals(pose))) motionPlayer.pause();
                     executePose(pose, joints, result);
                 }
 
@@ -115,6 +156,7 @@ public class AiActionExecutor {
                     }
                 }
                 if (obj.has("actions") && obj.get("actions").isJsonArray() && joints != null) {
+                    if (motionPlayer != null && animObj == null && !obj.getAsJsonArray("actions").isEmpty()) motionPlayer.pause();
                     JsonArray actions = obj.getAsJsonArray("actions");
                     for (JsonElement elem : actions) {
                         if (elem.isJsonObject()) {
@@ -141,9 +183,12 @@ public class AiActionExecutor {
 
             } catch (Exception e) {
                 System.err.println("Failed to parse AI action/animation JSON: " + e.getMessage());
+                result.cleanedMessage = rawResponse + "\n\n[Command error] AI command could not be processed: " + e.getMessage();
+                return result;
             }
         }
 
+        result.cleanedMessage = rawResponse + "\n\n[No action applied] No executable robot command was found in this response.";
         return result;
     }
 

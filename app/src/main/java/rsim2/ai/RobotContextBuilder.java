@@ -7,16 +7,39 @@ import rsim2.motion.MotionPlayer;
 import rsim2.motion.MotionSequence;
 import rsim2.scene.Joint;
 import rsim2.scene.SceneNode;
+import rsim2.scene.ObjectInteractionController;
 
 import java.util.*;
 
 public class RobotContextBuilder {
 
     public static String buildContext(SceneNode rootNode, List<Joint> joints, CollisionWorld collisionWorld, MotionPlayer motionPlayer) {
+        return buildContext(rootNode, joints, collisionWorld, motionPlayer, null);
+    }
+
+    public static String buildContext(SceneNode rootNode, List<Joint> joints, CollisionWorld collisionWorld,
+                                      MotionPlayer motionPlayer, ObjectInteractionController interactions) {
         StringBuilder sb = new StringBuilder();
 
         sb.append("You are an expert robotics kinematics and motion planning assistant embedded in RSim2 (3D Robot Simulator & Sim2Real Studio).\n");
         sb.append("You have full spatial awareness of the 3D scene, joint kinematics, forward kinematics (FK), collisions, and hardware controls.\n\n");
+
+        sb.append("=== SCENE OBJECTS (world coordinates, scene units) ===\n");
+        sb.append("No dynamics engine: grasping is a simulation-only kinematic attachment. Release holds the world pose; no gravity, force, friction or finger contact simulation.\n");
+        sb.append("Grasp uses position-only IK with conservative surface targets and collision-checked joint paths. It may reject blocked approaches; it does not plan finger closure or tool orientation. Use exact object and robot tool IDs; never invent joint angles to grasp.\n");
+        List<SceneNode> objects = ObjectInteractionController.objects(rootNode);
+        for (SceneNode object : objects) {
+            Vector3f center = ObjectInteractionController.objectCenter(object);
+            Vector3f position = object.getWorldTransform().getTranslation(new Vector3f());
+            org.joml.Quaternionf rotation = object.getWorldTransform().getUnnormalizedRotation(new org.joml.Quaternionf());
+            Vector3f scale = object.getWorldTransform().getScale(new Vector3f());
+            sb.append(String.format(Locale.ROOT,
+                    "Object ID: %s | World Pos=(%.4f, %.4f, %.4f) | Object center=(%.4f, %.4f, %.4f) | World rotation xyzw=(%.4f, %.4f, %.4f, %.4f) | World scale=(%.4f, %.4f, %.4f) | State=%s\n",
+                    new com.google.gson.Gson().toJson(object.getId()), position.x, position.y, position.z, center.x, center.y, center.z,
+                    rotation.x, rotation.y, rotation.z, rotation.w, scale.x, scale.y, scale.z,
+                    interactions == null ? "unknown" : interactions.state(object)));
+        }
+        if (objects.isEmpty()) sb.append("No environment objects loaded.\n");
 
         if (joints == null || joints.isEmpty()) {
             sb.append("=== CURRENT SCENE STATE ===\n");
@@ -85,7 +108,9 @@ public class RobotContextBuilder {
                 if (collisionWorld.getLastResult().getContacts() != null) {
                     for (rsim2.collision.ContactPair contact : collisionWorld.getLastResult().getContacts()) {
                         sb.append(String.format("  - Contact between \"%s\" and \"%s\" (type: %s)\n",
-                                contact.getNodeA().getId(), contact.getNodeB().getId(), contact.getType().name()));
+                                contact.getNodeA() != null ? contact.getNodeA().getId() : "Unknown",
+                                contact.getNodeB() != null ? contact.getNodeB().getId() : "Ground",
+                                contact.getType().name()));
                     }
                 }
             } else {
@@ -154,6 +179,13 @@ public class RobotContextBuilder {
         sb.append("```\n\n");
 
         sb.append("Always verify joint angular limits before commanding angles, and ensure movements are smooth and physically sound.\n");
+        sb.append("\n5. OBJECT INTERACTION (send as a standalone command, never combine with pose/actions/animation):\n");
+        sb.append("For 'approach the box and grasp it', emit the grasp JSON below: it performs both approach and attachment. A conversational promise alone cannot move the robot. Never claim execution before the simulator reports it.\n");
+        sb.append("```json\n{\"interaction\":{\"type\":\"grasp\",\"object\":\"exact_object_id\",\"tool\":\"exact_robot_link_id\",\"tool_offset\":[0,0,0]}}\n```\n");
+        sb.append("tool_offset is an optional LOCAL point on the tool, in scene units; default is its origin. Only specify a different offset when the user supplies/calibrates the gripper TCP. Ask which tool if ambiguous.\n");
+        sb.append("The simulator chooses an external surface approach accounting for tool geometry, solves joint-limited IK and checks intermediate poses. It attaches only near the chosen external target without penetration. All motor/animation steps are checked against environment bounds; blocked motion is stopped. Report approaching until completion, not immediate success. Rejected goals do not change the pose.\n");
+        sb.append("```json\n{\"interaction\":{\"type\":\"release\",\"object\":\"exact_object_id\"}}\n```\n");
+        sb.append("Once held, ordinary joint actions carry the object. Wait for grasp completion before issuing those actions. This does not command or verify a physical hardware gripper.\n");
 
         return sb.toString();
     }

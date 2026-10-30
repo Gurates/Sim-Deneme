@@ -81,6 +81,7 @@ public class Engine {
     private CollisionPanel collisionPanel;
     private CollisionWorld collisionWorld;
     private MotionPlayer motionPlayer;
+    private final rsim2.collision.MotionCollisionState motionCollisionState = new rsim2.collision.MotionCollisionState();
 
     private SceneNode rootNode;
     private List<Joint> joints = new ArrayList<>();
@@ -197,7 +198,7 @@ public class Engine {
         collisionWorld = new CollisionWorld();
 
         collisionPanel = new CollisionPanel(this, rootNode, joints, selectionManager, collisionWorld);
-        aiPanel = new AIPanel(this, rootNode, selectionManager, joints, motionPlayer);
+        aiPanel = new AIPanel(this, rootNode, selectionManager, joints, motionPlayer, collisionWorld);
         bridgePanel = new BridgePanel(motionPlayer, joints);
         rsim2.bridge.BridgeManager.getInstance().registerJoints(joints);
         toolbarPanel = new ToolbarPanel(this, rootNode, selectionManager, commandHistory, aiPanel, bridgePanel, collisionPanel);
@@ -475,17 +476,27 @@ public class Engine {
 
             glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
+            motionCollisionState.beginStep(rootNode, joints);
+            if (aiPanel != null) aiPanel.update(deltaTime);
+
             if (motionPlayer != null && motionPlayer.isPlaying()) {
                 motionPlayer.update(deltaTime, joints);
-                rsim2.bridge.BridgeManager.getInstance().streamCurrentJointStates(joints, motionPlayer.getCurrentTime());
             } else if (joints != null) {
                 for (Joint joint : joints) {
                     if (joint != null && joint.getMotor() != null) {
                         joint.getMotor().update(deltaTime);
                     }
                 }
-                rsim2.bridge.BridgeManager.getInstance().streamCurrentJointStates(joints, 0.0f);
             }
+
+            String blocked = motionCollisionState.validateAndCommit(rootNode, joints);
+            if (blocked != null) {
+                if (motionPlayer != null) motionPlayer.pause();
+                if (aiPanel != null) aiPanel.onMotionBlocked(blocked);
+            }
+            // Only publish poses after validation. Rejected steps never reach hardware or rendering.
+            rsim2.bridge.BridgeManager.getInstance().streamCurrentJointStates(joints,
+                    motionPlayer != null ? motionPlayer.getCurrentTime() : 0.0f);
 
             if (collisionWorld != null) {
                 collisionWorld.update(rootNode, joints);

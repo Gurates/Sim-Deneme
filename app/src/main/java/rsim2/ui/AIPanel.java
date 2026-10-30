@@ -19,10 +19,12 @@ import rsim2.editor.SelectionManager;
 import rsim2.motion.MotionPlayer;
 import rsim2.scene.Joint;
 import rsim2.scene.SceneNode;
+import rsim2.scene.ObjectInteractionController;
 
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
+import java.util.concurrent.ConcurrentLinkedQueue;
 
 public class AIPanel {
     private boolean visible = false;
@@ -37,6 +39,8 @@ public class AIPanel {
     private List<Joint> joints;
     private MotionPlayer motionPlayer;
     private CollisionWorld collisionWorld;
+    private ObjectInteractionController interactions = new ObjectInteractionController();
+    private final ConcurrentLinkedQueue<Runnable> pendingResponses = new ConcurrentLinkedQueue<>();
 
     private final AiConfig config;
     private final AiService aiService;
@@ -133,7 +137,39 @@ public class AIPanel {
     }
 
     public void setRootNode(SceneNode rootNode) {
+        if (this.rootNode != rootNode) interactions = new ObjectInteractionController();
         this.rootNode = rootNode;
+    }
+
+    /** Runs on the simulation thread, even while the chat panel is closed. */
+    public void update(float deltaTime) {
+        Runnable response;
+        while ((response = pendingResponses.poll()) != null) {
+            try {
+                response.run();
+            } catch (RuntimeException error) {
+                interactions.cancelPending();
+                reportAiError("Could not apply AI response", error);
+            }
+        }
+        var safety = rsim2.bridge.BridgeManager.getInstance().getSafetyFilter();
+        String event = interactions.update(deltaTime, rootNode, safety.isEmergencyStopActive()
+                || (motionPlayer != null && motionPlayer.isPlaying()));
+        if (event != null) {
+            chatHistory.add(new ChatMessage("System", event, false));
+            if (engine != null) engine.autoSaveProject();
+        }
+    }
+
+    public void onMotionBlocked(String reason) {
+        interactions.cancelPending();
+        chatHistory.add(new ChatMessage("System", "Motion stopped before collision: " + reason, false));
+    }
+
+    private void reportAiError(String operation, RuntimeException error) {
+        error.printStackTrace();
+        chatHistory.add(new ChatMessage("AI", operation + ": " + error.getMessage(), true));
+        isLoading = false;
     }
 
     public void setSelectionManager(SelectionManager selectionManager) {
@@ -367,28 +403,56 @@ public class AIPanel {
         chatHistory.add(new ChatMessage("User", userPrompt, false));
         isLoading = true;
 
-        String systemContext = buildRobotSystemContext();
+        requestResponse(userPrompt, false);
+    }
+
+    private void requestResponse(String userPrompt, boolean commandRetry) {
+
+        String systemContext;
+        try {
+            systemContext = buildRobotSystemContext();
+        } catch (RuntimeException error) {
+            reportAiError("Could not read scene for AI request", error);
+            return;
+        }
+        SceneNode requestedRoot = rootNode;
 
         aiService.sendMessageAsync(config, userPrompt, systemContext, new AiService.ResponseCallback() {
             @Override
             public void onSuccess(String responseText) {
-                AiActionExecutor.ExecutionResult execRes = AiActionExecutor.processAndExecute(responseText, joints, motionPlayer);
-                chatHistory.add(new ChatMessage("AI", execRes.cleanedMessage, false));
-                if (execRes.hasActions && engine != null) {
-                    engine.autoSaveProject();
-                }
-                isLoading = false;
+                pendingResponses.add(() -> {
+                    if (rootNode != requestedRoot) {
+                        chatHistory.add(new ChatMessage("System", "AI response discarded because the scene changed.", false));
+                    } else {
+                        AiActionExecutor.ExecutionResult execRes = AiActionExecutor.processAndExecute(
+                                responseText, joints, motionPlayer, rootNode, interactions);
+                        if (!execRes.hasActions && execRes.appliedActions.isEmpty() && !commandRetry
+                                && AiActionExecutor.isMotionRequest(userPrompt)) {
+                            chatHistory.add(new ChatMessage("System", "AI did not provide an executable command. Requesting the command; robot has not moved.", false));
+                            requestResponse(userPrompt + "\n\nThe previous reply did not supply an executable command. "
+                                    + "For the original requested motion, return exactly one JSON action using the action protocol and current scene IDs. "
+                                    + "For approach-and-grasp use interaction.type=grasp; it already performs the approach. "
+                                    + "Do not claim movement has started. If the target/tool is ambiguous or the request is informational, explain or ask for clarification instead of guessing.", true);
+                            return;
+                        }
+                        chatHistory.add(new ChatMessage("AI", execRes.cleanedMessage, false));
+                        if (execRes.hasActions && engine != null) engine.autoSaveProject();
+                    }
+                    isLoading = false;
+                });
             }
 
             @Override
             public void onError(String errorMessage) {
-                chatHistory.add(new ChatMessage("AI", errorMessage, true));
-                isLoading = false;
+                pendingResponses.add(() -> {
+                    chatHistory.add(new ChatMessage("AI", errorMessage, true));
+                    isLoading = false;
+                });
             }
         });
     }
 
     private String buildRobotSystemContext() {
-        return RobotContextBuilder.buildContext(rootNode, joints, collisionWorld, motionPlayer);
+        return RobotContextBuilder.buildContext(rootNode, joints, collisionWorld, motionPlayer, interactions);
     }
 }

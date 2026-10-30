@@ -72,11 +72,11 @@ public class SceneNode {
             Matrix4f newLocalTransform = newParentWorldInverse.mul(currentWorld, new Matrix4f());
 
             newLocalTransform.getTranslation(this.localPosition);
-            newLocalTransform.getNormalizedRotation(this.localRotation);
+            newLocalTransform.getUnnormalizedRotation(this.localRotation);
             newLocalTransform.getScale(this.localScale);
         } else {
             currentWorld.getTranslation(this.localPosition);
-            currentWorld.getNormalizedRotation(this.localRotation);
+            currentWorld.getUnnormalizedRotation(this.localRotation);
             currentWorld.getScale(this.localScale);
         }
     }
