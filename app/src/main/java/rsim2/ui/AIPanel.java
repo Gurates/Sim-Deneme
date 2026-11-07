@@ -153,8 +153,7 @@ public class AIPanel {
             }
         }
         var safety = rsim2.bridge.BridgeManager.getInstance().getSafetyFilter();
-        String event = interactions.update(deltaTime, rootNode, safety.isEmergencyStopActive()
-                || (motionPlayer != null && motionPlayer.isPlaying()));
+        String event = interactions.update(deltaTime, rootNode, safety.isEmergencyStopActive());
         if (event != null) {
             chatHistory.add(new ChatMessage("System", event, false));
             if (engine != null) engine.autoSaveProject();
@@ -259,7 +258,6 @@ public class AIPanel {
                         ImGui.sameLine();
                         renderSafeWrappedText(msg.text);
                     } else if ("System".equals(msg.sender)) {
-                        renderSafeColoredWrappedText(0.95f, 0.75f, 0.2f, 1.0f, "[Info] " + msg.text);
                     } else {
                         if (msg.isError) {
                             ImGui.textColored(1.0f, 0.35f, 0.35f, 1.0f, "[Error]");
@@ -401,6 +399,25 @@ public class AIPanel {
 
     private void sendMessage(String userPrompt) {
         chatHistory.add(new ChatMessage("User", userPrompt, false));
+        String control = userPrompt.trim().toLowerCase(java.util.Locale.forLanguageTag("tr-TR"));
+        if (java.util.Set.of("başla", "başlat", "devam", "devam et", "play", "start").contains(control)) {
+            if (motionPlayer.hasSequence()) {
+                motionPlayer.play();
+                chatHistory.add(new ChatMessage("System", "Playing: " + motionPlayer.getSequence().getName(), false));
+            } else {
+                chatHistory.add(new ChatMessage("System", "No motion is loaded. The last grasp may have been rejected; Play cannot start a rejected plan. Request a joint movement or a new grasp first.", false));
+            }
+            return;
+        }
+        if (java.util.Set.of("duraklat", "pause").contains(control)) {
+            motionPlayer.pause();
+            return;
+        }
+        if (java.util.Set.of("dur", "durdur", "stop").contains(control)) {
+            motionPlayer.stop();
+            motionPlayer.seek(0, joints);
+            return;
+        }
         isLoading = true;
 
         requestResponse(userPrompt, false);
@@ -432,6 +449,7 @@ public class AIPanel {
                             requestResponse(userPrompt + "\n\nThe previous reply did not supply an executable command. "
                                     + "For the original requested motion, return exactly one JSON action using the action protocol and current scene IDs. "
                                     + "For approach-and-grasp use interaction.type=grasp; it already performs the approach. "
+                                    + "For closer/approach-only requests use interaction.type=approach, never grasp. A safe partial advance is supported. "
                                     + "Do not claim movement has started. If the target/tool is ambiguous or the request is informational, explain or ask for clarification instead of guessing.", true);
                             return;
                         }

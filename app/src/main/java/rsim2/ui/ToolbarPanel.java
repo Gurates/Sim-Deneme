@@ -162,6 +162,7 @@ public class ToolbarPanel {
             ImGui.pushStyleColor(ImGuiCol.ButtonHovered, 0.95f, 0.60f, 0.25f, 1.0f);
             if (ImGui.button("|| Pause", 68.0f, 24.0f)) {
                 if (motionPlayer != null) {
+                    motionPlayer.bindJoints(engine.getJoints());
                     motionPlayer.pause();
                 }
             }
@@ -171,11 +172,13 @@ public class ToolbarPanel {
                 ImGui.pushStyleColor(ImGuiCol.Button, 0.18f, 0.68f, 0.35f, 1.0f);
                 ImGui.pushStyleColor(ImGuiCol.ButtonHovered, 0.22f, 0.78f, 0.42f, 1.0f);
             }
+            ImGui.beginDisabled(!hasSequence);
             if (ImGui.button("> Play", 68.0f, 24.0f)) {
                 if (motionPlayer != null) {
                     motionPlayer.play();
                 }
             }
+            ImGui.endDisabled();
             if (hasSequence) {
                 ImGui.popStyleColor(2);
             }
@@ -187,6 +190,7 @@ public class ToolbarPanel {
         ImGui.sameLine();
         if (ImGui.button("[] Stop", 60.0f, 24.0f)) {
             if (motionPlayer != null) {
+                motionPlayer.bindJoints(engine.getJoints());
                 motionPlayer.stop();
                 motionPlayer.seek(0.0f, engine.getJoints());
             }
@@ -220,7 +224,7 @@ public class ToolbarPanel {
             }
         }
 
-        ImGui.sameLine(displayWidth - 500.0f);
+        ImGui.sameLine(displayWidth - 450.0f);
 
 
         if(ImGui.button("Scene Object", 100,24.0f)){

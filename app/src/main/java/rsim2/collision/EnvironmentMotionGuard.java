@@ -50,7 +50,9 @@ public final class EnvironmentMotionGuard {
                 }
                 travel += delta * radius;
             }
-            double distanceStep = Math.max(0.0001, Math.min(0.002, smallest * 0.5));
+            // Resolution follows geometry scale. A hard 0.002 scene-unit cap made
+            // scaled robots exceed MAX_SAMPLES on otherwise ordinary movements.
+            double distanceStep = Math.max(0.0001, smallest * 0.5);
             double required = Math.max(Math.ceil(angularTravel / 0.01), Math.ceil(travel / distanceStep));
             if (!Double.isFinite(required) || required > MAX_SAMPLES) return "Motion step is too large to collision-check safely.";
             int samples = Math.max(1, (int) required);
@@ -89,9 +91,14 @@ public final class EnvironmentMotionGuard {
     private static void collect(SceneNode node, SceneNode environment, boolean movable, Set<SceneNode> roots, List<Body> result) {
         if (environment == null && !node.isRobotPart()) environment = node;
         movable |= roots.contains(node);
-        AABB local = node.getCollisionShape() != null ? node.getCollisionShape().getLocalAABB()
-                : node.getMeshes().isEmpty() ? null : new AABB(node.getCombinedBoundingBoxMin(), node.getCombinedBoundingBoxMax());
-        if (local != null && local.isValid()) result.add(new Body(node, environment, movable, local));
+        if (node.getCollisionShape() != null) {
+            AABB local = node.getCollisionShape().getLocalAABB();
+            if (local.isValid()) result.add(new Body(node, environment, movable, local));
+        } else for (var mesh : node.getMeshes()) {
+            // Combining separate finger meshes into one box fills the open gripper gap.
+            AABB local = new AABB(mesh.getMinBound(), mesh.getMaxBound());
+            if (local.isValid()) result.add(new Body(node, environment, movable, local));
+        }
         for (SceneNode child : node.getChildren()) collect(child, environment, movable, roots, result);
     }
 
@@ -121,7 +128,10 @@ public final class EnvironmentMotionGuard {
             if (!ba.box.getCenter().isFinite() || !ba.box.getHalfExtents().isFinite()) return "Invalid geometry: " + a.node.getId();
             if (checkGround && a.movable && ba.box.getMinY() < -EPS) {
                 boolean unchanged = previous != null && ba.transform.equals(previous.get(i).transform, 1e-7f);
-                boolean escaping = previous != null && ba.box.getMinY() > previous.get(i).box.getMinY() + EPS;
+                // Imported bases can already sit a little below the floor. Rotation along the
+                // floor must remain possible; reject only new or deeper penetration.
+                boolean escaping = previous != null && previous.get(i).box.getMinY() < -EPS
+                        && ba.box.getMinY() >= previous.get(i).box.getMinY() - EPS;
                 if (!unchanged && !escaping) return a.node.getId() + " intersects the ground.";
             }
             for (int j = i + 1; j < bodies.size(); j++) {

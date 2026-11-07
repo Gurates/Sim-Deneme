@@ -179,8 +179,9 @@ public class AiInteractionTest {
         AiActionExecutor.processAndExecute("{\"animation\":{\"duration\":2,\"loop\":true,\"keyframes\":[{\"time\":0,\"joints\":{\"shoulder\":0}}]}}", testJoints, motionPlayer);
         assertTrue(motionPlayer.isPlaying());
         AiActionExecutor.processAndExecute("{\"actions\":[{\"joint\":\"shoulder\",\"target_deg\":30}]}", testJoints, motionPlayer);
-        assertFalse(motionPlayer.isPlaying());
-        for (int i = 0; i < 200; i++) testJoints.get(0).getMotor().update(0.01f);
+        assertTrue(motionPlayer.isPlaying());
+        assertFalse(motionPlayer.getSequence().isLoop());
+        for (int i = 0; i < 200; i++) motionPlayer.update(0.01f, testJoints);
         assertEquals(30, Math.toDegrees(testJoints.get(0).getCurrentAngleRadians()), 0.1);
     }
 

@@ -133,6 +133,7 @@ public class RobotContextBuilder {
         }
 
         sb.append("\n=== ACTION PROTOCOL & TOOL EXECUTION ===\n");
+        sb.append("Playback: start/basla resumes the loaded motion, pause/duraklat pauses, stop/durdur stops. Never interpret start as the HOME pose. Direct joint/pose and grasp approaches create replayable toolbar motions. If an approach was rejected there is no new motion to play; ask for a new goal or corrected target.\n");
         sb.append("When the user asks you to move the robot, assume a pose, wave, clear collisions, or execute motion, you MUST provide your clear conversational response first, and then append a JSON block formatted exactly as below:\n\n");
 
         sb.append("1. PRESET POSES (Home / Zero / Rest):\n");
@@ -180,6 +181,8 @@ public class RobotContextBuilder {
 
         sb.append("Always verify joint angular limits before commanding angles, and ensure movements are smooth and physically sound.\n");
         sb.append("\n5. OBJECT INTERACTION (send as a standalone command, never combine with pose/actions/animation):\n");
+        sb.append("APPROACH WITHOUT GRASP: for 'Simply bring the robotic arm closer to the box, as close as possible', 'move closer', or 'sadece yaklas', emit type=approach. Do not use grasp, attach, or demand a reachable grasp surface for these requests. The local planner may execute a safe partial advance if it cannot reach the surface; it reports measured TCP distance and stops before penetration. It is a sampled direct approach, not a proof of globally closest reach.\n");
+        sb.append("```json\n{\"interaction\":{\"type\":\"approach\",\"object\":\"exact_object_id\",\"tool\":\"exact_robot_link_id\"}}\n```\n");
         sb.append("For 'approach the box and grasp it', emit the grasp JSON below: it performs both approach and attachment. A conversational promise alone cannot move the robot. Never claim execution before the simulator reports it.\n");
         sb.append("```json\n{\"interaction\":{\"type\":\"grasp\",\"object\":\"exact_object_id\",\"tool\":\"exact_robot_link_id\",\"tool_offset\":[0,0,0]}}\n```\n");
         sb.append("tool_offset is an optional LOCAL point on the tool, in scene units; default is its origin. Only specify a different offset when the user supplies/calibrates the gripper TCP. Ask which tool if ambiguous.\n");

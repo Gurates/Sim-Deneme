@@ -288,11 +288,19 @@ public class RobotJsonIO {
             }
         }
 
-        for (SceneNode node : result.nodesById.values()) {
-            if (node.getParent() == null) {
-                result.rootNode = node;
-                break;
-            }
+        // A saved editor "world" has no joint to the robot base. Returning an arbitrary
+        // HashMap root can otherwise leave the entire articulated robot disconnected.
+        List<SceneNode> roots = new ArrayList<>();
+        for (LinkDTO link : def.links) {
+            SceneNode node = result.nodesById.get(link.id);
+            if (node.getParent() == null) roots.add(node);
+        }
+        if (roots.size() == 1) result.rootNode = roots.get(0);
+        else if (!roots.isEmpty()) {
+            SceneNode world = result.nodesById.get("world");
+            if (world == null || world.getParent() != null) world = new SceneNode("scene_world");
+            result.rootNode = world;
+            for (SceneNode node : roots) if (node != world) world.addChild(node);
         }
 
         return result;

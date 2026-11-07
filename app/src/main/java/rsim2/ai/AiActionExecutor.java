@@ -69,6 +69,9 @@ public class AiActionExecutor {
         if (jsonContent != null) {
             try {
                 JsonObject obj = JsonParser.parseString(jsonContent).getAsJsonObject();
+                float[] startAngles = joints == null ? null : rsim2.motion.JointMotion.angles(joints);
+                if (motionPlayer != null) motionPlayer.bindJoints(joints);
+                boolean interactionFailed = false;
 
                 if (obj.has("interaction")) {
                     try {
@@ -81,20 +84,33 @@ public class AiActionExecutor {
                         String type = action.get("type").getAsString();
                         String objectId = action.get("object").getAsString();
                         String message;
-                        if ("grasp".equals(type)) {
-                            if (motionPlayer != null && motionPlayer.isPlaying()) throw new IllegalArgumentException("Pause the motion player before grasping.");
+                        if ("grasp".equals(type) || "approach".equals(type)) {
+                            if (motionPlayer != null && motionPlayer.isPlaying()) throw new IllegalArgumentException("Pause the current motion before planning a new approach or grasp.");
                             Vector3f offset = new Vector3f();
                             if (action.has("tool_offset")) {
                                 JsonArray a = action.getAsJsonArray("tool_offset");
                                 if (a.size() != 3) throw new IllegalArgumentException("tool_offset requires three coordinates.");
                                 offset.set(a.get(0).getAsFloat(), a.get(1).getAsFloat(), a.get(2).getAsFloat());
                             }
-                            message = interactions.grasp(root, joints, objectId, action.get("tool").getAsString(), offset);
+                            message = "approach".equals(type)
+                                    ? interactions.approach(root, joints, objectId, action.get("tool").getAsString(), offset)
+                                    : interactions.grasp(root, joints, objectId, action.get("tool").getAsString(), offset);
+                            if (motionPlayer != null) {
+                                MotionSequence approach = rsim2.motion.JointMotion.fromTargets(type + " " + objectId, joints, startAngles);
+                                if (approach != null) {
+                                    motionPlayer.loadSequence(approach);
+                                    motionPlayer.play();
+                                    if ("grasp".equals(type)) interactions.bindPlayback(motionPlayer, approach);
+                                    result.generatedSequence = approach;
+                                    result.hasAnimation = true;
+                                }
+                            }
                         } else if ("release".equals(type)) {
                             message = interactions.release(root, objectId);
                         } else throw new IllegalArgumentException("Unknown interaction type: " + type);
                         result.appliedActions.add("[Interaction] " + message);
                     } catch (RuntimeException e) {
+                        interactionFailed = true;
                         result.appliedActions.add("[Interaction failed] " + e.getMessage());
                     }
                 } else if (interactions != null && (obj.has("pose") || obj.has("actions") || obj.has("animation")
@@ -167,13 +183,23 @@ public class AiActionExecutor {
                 }
 
                 if (!result.appliedActions.isEmpty()) {
-                    result.hasActions = true;
-                    String clean = (matchedBlock != null) ? rawResponse.replace(matchedBlock, "").trim() : rawResponse;
+                    if (!interactionFailed && !obj.has("interaction") && animObj == null && joints != null
+                            && motionPlayer != null && (obj.has("pose") || obj.has("actions"))) {
+                        MotionSequence direct = rsim2.motion.JointMotion.fromTargets("AI Joint Motion", joints, startAngles);
+                        if (direct != null) {
+                            motionPlayer.loadSequence(direct);
+                            motionPlayer.play();
+                            result.generatedSequence = direct;
+                            result.hasAnimation = true;
+                        }
+                    }
+                    result.hasActions = !interactionFailed;
+                    String clean = interactionFailed ? "" : (matchedBlock != null) ? rawResponse.replace(matchedBlock, "").trim() : rawResponse;
                     StringBuilder sb = new StringBuilder(clean);
                     if (sb.length() > 0) {
                         sb.append("\n\n");
                     }
-                    sb.append("[Executed Actions]:\n");
+                    sb.append(interactionFailed ? "[Command rejected — robot did not move]:\n" : "[Applied Commands]:\n");
                     for (String msg : result.appliedActions) {
                         sb.append("  • ").append(msg).append("\n");
                     }

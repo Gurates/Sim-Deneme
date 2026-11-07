@@ -5,6 +5,7 @@ import rsim2.scene.Joint;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.ArrayList;
 
 public class MotionPlayer {
     private MotionSequence sequence;
@@ -12,6 +13,7 @@ public class MotionPlayer {
     private float playbackSpeed = 1.0f;
     private boolean isPlaying = false;
     private boolean isLooping = false;
+    private List<Joint> controlledJoints = List.of();
 
     private final Map<String, Float> sampledAngles = new HashMap<>();
 
@@ -44,6 +46,14 @@ public class MotionPlayer {
 
     public void pause() {
         isPlaying = false;
+        for (Joint joint : controlledJoints) if (joint.getMotor() != null) {
+            joint.getMotor().setTargetAngleRadians(joint.getCurrentAngleRadians());
+            joint.getMotor().setCurrentVelocity(0);
+        }
+    }
+
+    public void bindJoints(List<Joint> joints) {
+        controlledJoints = joints == null ? List.of() : new ArrayList<>(joints);
     }
 
     public void togglePlay() {
@@ -55,17 +65,19 @@ public class MotionPlayer {
     }
 
     public void stop() {
-        isPlaying = false;
+        pause();
         currentTime = 0.0f;
     }
 
     public void seek(float timeSeconds, List<Joint> joints) {
+        bindJoints(joints);
         if (!hasSequence()) return;
         this.currentTime = Math.max(0.0f, Math.min(sequence.getDurationSeconds(), timeSeconds));
         applyCurrentFrame(joints);
     }
 
     public void update(float deltaTime, List<Joint> joints) {
+        bindJoints(joints);
         if (!isPlaying || !hasSequence() || joints == null) {
             return;
         }
