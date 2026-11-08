@@ -192,11 +192,10 @@ public class ToolbarPanel {
             if (motionPlayer != null) {
                 motionPlayer.bindJoints(engine.getJoints());
                 motionPlayer.stop();
-                motionPlayer.seek(0.0f, engine.getJoints());
             }
         }
         if (ImGui.isItemHovered()) {
-            ImGui.setTooltip("Stop and Reset Motion to 0.00s");
+            ImGui.setTooltip("Stop motion at the current pose");
         }
 
         ImGui.sameLine();

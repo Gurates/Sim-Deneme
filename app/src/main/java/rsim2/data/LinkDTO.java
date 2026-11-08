@@ -6,6 +6,8 @@ public class LinkDTO {
     public String id;
     public String mesh;
     public List<String> meshes;
+    /** Column-major transforms from each source mesh into its link frame. */
+    public List<float[]> meshTransforms;
     public float mass;
     public float[] scale;
     public float[] rotation;

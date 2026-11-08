@@ -54,6 +54,17 @@ public class CollisionMath {
     public static boolean intersectGJK(CollisionShape shapeA, Matrix4f transformA,
                                        CollisionShape shapeB, Matrix4f transformB,
                                        float margin) {
+        return intersectGJK(shapeA, transformA, shapeB, transformB, margin, false);
+    }
+
+    /** A guard accepts separation only when GJK proves it; exhaustion is blocked. */
+    public static boolean intersectGJKConservative(CollisionShape a, Matrix4f ta, CollisionShape b, Matrix4f tb) {
+        return intersectGJK(a, ta, b, tb, 0, true);
+    }
+
+    private static boolean intersectGJK(CollisionShape shapeA, Matrix4f transformA,
+                                       CollisionShape shapeB, Matrix4f transformB,
+                                       float margin, boolean conservative) {
         Vector3f[] simplex = new Vector3f[4];
         simplex[0] = new Vector3f();
         simplex[1] = new Vector3f();
@@ -100,7 +111,7 @@ public class CollisionMath {
             simplexSize = nextSimplexSize;
         }
 
-        return false;
+        return conservative;
     }
 
     private static int nextSimplexSize = 0;

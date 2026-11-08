@@ -20,7 +20,7 @@ import java.util.regex.Pattern;
 
 public class AiActionExecutor {
     public static boolean isMotionRequest(String prompt) {
-        return prompt != null && Pattern.compile("(?iu)\\b(hareket|tut|yakala|kavra|bırak|birak|taşı|tasi|döndür|dondur|kaldır|kaldir|move|grasp|grab|pick|release|rotate|home)\\b").matcher(prompt).find();
+        return prompt != null && Pattern.compile("(?iu)\\b(hareket|tut|yakala|kavra|bırak|birak|taşı|tasi|döndür|dondur|kaldır|kaldir|move|lift|grasp|grab|pick|release|rotate|home)\\b").matcher(prompt).find();
     }
 
     private static final Pattern JSON_BLOCK_PATTERN = Pattern.compile("```(?:json|action)?\\s*(\\{[\\s\\S]*?\\})\\s*```", Pattern.CASE_INSENSITIVE);
@@ -39,6 +39,12 @@ public class AiActionExecutor {
 
     public static ExecutionResult processAndExecute(String rawResponse, List<Joint> joints, MotionPlayer motionPlayer,
                                                    SceneNode root, ObjectInteractionController interactions) {
+        return processAndExecute(rawResponse, joints, motionPlayer, root, interactions, null);
+    }
+
+    public static ExecutionResult processAndExecute(String rawResponse, List<Joint> joints, MotionPlayer motionPlayer,
+                                                   SceneNode root, ObjectInteractionController interactions,
+                                                   GraspLiftCoordinator task) {
         ExecutionResult result = new ExecutionResult();
         result.cleanedMessage = rawResponse;
 
@@ -84,7 +90,22 @@ public class AiActionExecutor {
                         String type = action.get("type").getAsString();
                         String objectId = action.get("object").getAsString();
                         String message;
-                        if ("grasp".equals(type) || "approach".equals(type)) {
+                        if ("grasp_and_lift".equals(type) || "lift".equals(type)) {
+                            if (task == null) throw new IllegalArgumentException("Grasp-and-lift task execution is unavailable.");
+                            Vector3f offset = new Vector3f();
+                            if (action.has("tool_offset")) {
+                                JsonArray a = action.getAsJsonArray("tool_offset");
+                                if (a.size() != 3) throw new IllegalArgumentException("tool_offset requires three coordinates.");
+                                offset.set(a.get(0).getAsFloat(), a.get(1).getAsFloat(), a.get(2).getAsFloat());
+                            }
+                            float height = action.has("lift_distance") ? action.get("lift_distance").getAsFloat() : 0.05f;
+                            String tool = action.has("tool") ? action.get("tool").getAsString() : null;
+                            message = task.start(root, joints, interactions, motionPlayer, objectId, tool, offset, height,
+                                    "grasp_and_lift".equals(type));
+                            result.generatedSequence = motionPlayer.getSequence();
+                            result.hasAnimation = true;
+                        } else if ("grasp".equals(type) || "approach".equals(type)) {
+                            if (task != null && task.isActive()) throw new IllegalArgumentException("Stop the active grasp-and-lift task before planning another interaction.");
                             if (motionPlayer != null && motionPlayer.isPlaying()) throw new IllegalArgumentException("Pause the current motion before planning a new approach or grasp.");
                             Vector3f offset = new Vector3f();
                             if (action.has("tool_offset")) {
@@ -106,6 +127,7 @@ public class AiActionExecutor {
                                 }
                             }
                         } else if ("release".equals(type)) {
+                            if (task != null) task.cancel("release requested");
                             message = interactions.release(root, objectId);
                         } else throw new IllegalArgumentException("Unknown interaction type: " + type);
                         result.appliedActions.add("[Interaction] " + message);
@@ -116,6 +138,7 @@ public class AiActionExecutor {
                 } else if (interactions != null && (obj.has("pose") || obj.has("actions") || obj.has("animation")
                         || obj.has("trajectory") || obj.has("keyframes") || obj.has("system"))) {
                     interactions.cancelPending();
+                    if (task != null) task.cancel("another robot command was requested");
                 }
 
                 // Mixed commands are rejected above and must not execute their motion half.
@@ -194,12 +217,12 @@ public class AiActionExecutor {
                         }
                     }
                     result.hasActions = !interactionFailed;
-                    String clean = interactionFailed ? "" : (matchedBlock != null) ? rawResponse.replace(matchedBlock, "").trim() : rawResponse;
+                    String clean = (interactionFailed || obj.has("interaction")) ? "" : (matchedBlock != null) ? rawResponse.replace(matchedBlock, "").trim() : rawResponse;
                     StringBuilder sb = new StringBuilder(clean);
                     if (sb.length() > 0) {
                         sb.append("\n\n");
                     }
-                    sb.append(interactionFailed ? "[Command rejected — robot did not move]:\n" : "[Applied Commands]:\n");
+                    sb.append(interactionFailed ? "[Command rejected — robot did not move]:\n" : obj.has("interaction") ? "[Command accepted]:\n" : "[Applied Commands]:\n");
                     for (String msg : result.appliedActions) {
                         sb.append("  • ").append(msg).append("\n");
                     }

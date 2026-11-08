@@ -23,6 +23,7 @@ public class ObjectInteractionController {
     private Matrix4f objectPoseAtPlan;
     private MotionPlayer approachPlayer;
     private MotionSequence approachSequence;
+    private long approachStopGeneration;
     private final EnvironmentMotionGuard motionGuard = new EnvironmentMotionGuard();
     private static final float SURFACE_CLEARANCE = 0.01f;
     private float remainingSeconds;
@@ -102,26 +103,28 @@ public class ObjectInteractionController {
             for (Joint j : joints) if (j.getChildNode() == n && j.getType() == JointType.REVOLUTE) chain.add(j);
         }
         if (chain.isEmpty()) throw new IllegalArgumentException("Tool has no movable ancestor joints.");
-        Vector3f offset = new Vector3f(toolOffset);
+        Vector3f offset = captureOffset(tool, toolOffset);
         if (!offset.isFinite()) throw new IllegalArgumentException("Tool offset must be finite.");
         sceneJoints = List.copyOf(joints);
         float[] start = angles(sceneJoints);
         float[] solution = null;
         Vector3f target = null;
         String[] rejection = {null};
-        for (Vector3f candidate : graspTargets(object, tool, offset)) {
-            solution = solve(chain, tool, offset, candidate, () -> {
+        search: for (Vector3f contactOffset : captureOffsets(tool, toolOffset)) {
+        for (Vector3f candidate : graspTargets(object, tool, contactOffset)) {
+            solution = solve(chain, tool, contactOffset, candidate, () -> {
                 String reason = motionGuard.collisionAtPose(root, sceneJoints);
                 if (reason != null) reason = "Target pose: " + reason;
+                else if (!canCapture(object, tool, contactOffset)) reason = "Tool geometry remains outside capture clearance (TCP " + objectDistance(toolPoint(tool, contactOffset), object) + ", geometry " + geometryDistance(tool, object) + ", tolerance " + captureTolerance(object) + ").";
                 else {
                     reason = motionGuard.validateStep(root, sceneJoints, start, angles(sceneJoints));
                     if (reason != null) reason = "Approach path: " + reason;
                 }
-                if (reason != null) rejection[0] = reason;
+                if (reason != null) { rejection[0] = reason; if (Boolean.getBoolean("rsim2.grasp.debug")) System.err.println(candidate + " " + contactOffset + " " + reason); }
                 return reason == null;
-            });
-            if (solution != null) { target = candidate; break; }
-        }
+            }, false, captureTolerance(object) * .25f);
+            if (solution != null) { target = candidate; offset = contactOffset; break search; }
+        }}
         if (solution == null) throw new IllegalArgumentException(rejection[0] == null
                 ? "No IK solution reached the sampled surface points within joint limits. Check object position/scale and the selected tool."
                 : "Surface approach blocked: " + rejection[0]);
@@ -218,6 +221,184 @@ public class ObjectInteractionController {
         return result;
     }
 
+    /** Default to the distal end of a mesh tool, rather than its hinge/pivot. Explicit TCPs win. */
+    public static Vector3f captureOffset(SceneNode tool, Vector3f requested) {
+        if (requested == null || !requested.isFinite()) throw new IllegalArgumentException("Tool offset must be finite.");
+        if (requested.lengthSquared() != 0 || tool.getMeshes().isEmpty()) return new Vector3f(requested);
+        Vector3f farthest = new Vector3f();
+        for (var mesh : tool.getMeshes()) {
+            float[] vertices = mesh.getVertices();
+            for (int i = 0; vertices != null && i + 2 < vertices.length; i += 3) {
+                Vector3f point = new Vector3f(vertices[i], vertices[i + 1], vertices[i + 2]);
+                if (point.lengthSquared() > farthest.lengthSquared()) farthest.set(point);
+            }
+        }
+        if (farthest.lengthSquared() == 0) return farthest;
+        // Keep an actual surface point. Averaging distal vertices can place a TCP
+        // inside the jaw, making a small visual-contact clearance unreachable.
+        return farthest;
+    }
+
+    private static List<Vector3f> captureOffsets(SceneNode tool, Vector3f requested) {
+        Vector3f tip = captureOffset(tool, requested);
+        List<Vector3f> result = new ArrayList<>(); result.add(tip);
+        if (requested.lengthSquared() != 0 || tool.getMeshes().isEmpty()) return result;
+        // A distal corner need not lead the jaw for every object face/orientation.
+        // Try real distal surface vertices extremal along each tool-local axis.
+        for (int axis = 0; axis < 3; axis++) for (int sign : new int[]{-1,1}) {
+            Vector3f support = new Vector3f(tip);
+            for (var mesh : tool.getMeshes()) {
+                float[] vertices = mesh.getVertices();
+                for (int i = 0; vertices != null && i + 2 < vertices.length; i += 3) {
+                    Vector3f v = new Vector3f(vertices[i], vertices[i+1], vertices[i+2]);
+                    if (v.lengthSquared() >= tip.lengthSquared() * .5f && sign*v.get(axis) > sign*support.get(axis)) support.set(v);
+                }
+            }
+            if (result.stream().noneMatch(v -> v.distanceSquared(support) < 1e-10f)) result.add(support);
+        }
+        return result;
+    }
+
+    private static boolean canCapture(SceneNode object, SceneNode tool, Vector3f offset) {
+        AABB bounds = objectBounds(object);
+        if (bounds.getHalfExtents().lengthSquared() == 0)
+            return toolPoint(tool, offset).distance(bounds.getCenter()) <= CAPTURE_DISTANCE;
+        // Clearance targets are planning aids, not evidence of contact. Require the
+        // calibrated/derived TCP AND actual tool geometry near the object at capture.
+        boolean pointTool = tool.getMeshes().isEmpty() && tool.getCollisionShape() == null;
+        float tolerance = captureTolerance(object);
+        if (pointTool) return objectDistance(toolPoint(tool, offset), object) <= tolerance;
+        return (tool.getMeshes().isEmpty() || objectDistance(toolPoint(tool, offset), object) <= tolerance)
+                && geometryDistance(tool, object) <= tolerance;
+    }
+
+    private static float captureTolerance(SceneNode object) {
+        Vector3f size = objectBounds(object).getExtents();
+        float smallest = Float.POSITIVE_INFINITY;
+        for (float extent : new float[]{size.x, size.y, size.z}) if (extent > 0) smallest = Math.min(smallest, extent);
+        return Float.isFinite(smallest) ? Math.min(.01f, smallest * .05f) : CAPTURE_DISTANCE;
+    }
+
+    private static float pointDistance(Vector3f point, AABB bounds) {
+        return point.distance(new Vector3f(point).max(bounds.getMin()).min(bounds.getMax()));
+    }
+
+    private static float objectDistance(Vector3f point, SceneNode object) {
+        float distance = Float.POSITIVE_INFINITY;
+        Matrix4f world = object.getWorldTransform();
+        if (object.getCollisionShape() != null) distance = shapeDistance(point, object.getCollisionShape(), world);
+        else for (var mesh : object.getMeshes()) distance = Math.min(distance, meshDistance(point, mesh, world));
+        for (SceneNode child : object.getChildren()) distance = Math.min(distance, objectDistance(point, child));
+        return distance;
+    }
+
+    private static float shapeDistance(Vector3f point, rsim2.collision.CollisionShape shape, Matrix4f world) {
+        if (shape instanceof rsim2.collision.CompoundShape compound) {
+            float distance = Float.POSITIVE_INFINITY;
+            for (var entry : compound.getChildren()) distance = Math.min(distance,
+                    shapeDistance(point, entry.getShape(), new Matrix4f(world).mul(entry.getLocalTransform())));
+            return distance;
+        }
+        AABB local = shape.getLocalAABB();
+        Vector3f nearest = new Matrix4f(world).invert().transformPosition(new Vector3f(point)).max(local.getMin()).min(local.getMax());
+        return world.transformPosition(nearest).distance(point);
+    }
+
+    private static float meshDistance(Vector3f point, rsim2.graphics.Mesh mesh, Matrix4f world) {
+        float[] vertices = mesh.getVertices(); int[] indices = mesh.getIndices();
+        float distance = Float.POSITIVE_INFINITY;
+        for (int i = 0; indices != null && i + 2 < indices.length; i += 3) {
+            Vector3f[] triangle = triangle(vertices, indices, i, world);
+            Vector3f nearest = new Vector3f();
+            org.joml.Intersectionf.findClosestPointOnTriangle(triangle[0], triangle[1], triangle[2], point, nearest);
+            if (nearest.isFinite()) distance = Math.min(distance, nearest.distance(point));
+        }
+        if (Float.isFinite(distance)) return distance;
+        for (int i = 0; vertices != null && i + 2 < vertices.length; i += 3)
+            distance = Math.min(distance, world.transformPosition(new Vector3f(vertices[i], vertices[i+1], vertices[i+2])).distance(point));
+        return distance;
+    }
+
+    private static Vector3f[] triangle(float[] vertices, int[] indices, int i, Matrix4f world) {
+        Vector3f[] triangle = new Vector3f[3];
+        for (int j = 0; j < 3; j++) {
+            int v = indices[i+j] * 3;
+            triangle[j] = world.transformPosition(new Vector3f(vertices[v], vertices[v+1], vertices[v+2]));
+        }
+        return triangle;
+    }
+
+    private static float geometryDistance(SceneNode tool, SceneNode object) {
+        float distance = Float.POSITIVE_INFINITY;
+        Matrix4f world = tool.getWorldTransform();
+        for (var mesh : tool.getMeshes()) {
+            float[] vertices = mesh.getVertices();
+            int[] indices = mesh.getIndices();
+            for (int i = 0; vertices != null && i + 2 < vertices.length; i += 3)
+                distance = Math.min(distance, objectDistance(world.transformPosition(new Vector3f(vertices[i], vertices[i+1], vertices[i+2])), object));
+            for (int i = 0; indices != null && i + 2 < indices.length; i += 3) {
+                Vector3f[] triangle = triangle(vertices, indices, i, world);
+                // A point on a real triangle, rather than the empty space in a
+                // whole-tool bounding box (which can include the gripper opening).
+                Vector3f nearest = new Vector3f();
+                org.joml.Intersectionf.findClosestPointOnTriangle(triangle[0], triangle[1], triangle[2], objectCenter(object), nearest);
+                if (nearest.isFinite()) distance = Math.min(distance, objectDistance(nearest, object));
+            }
+        }
+        if (Float.isFinite(distance)) return distance;
+        if (tool.getCollisionShape() != null) {
+            return collisionGeometryDistance(tool.getCollisionShape(), world, object);
+        }
+        // Geometry-free tool markers represent an explicitly configured point TCP.
+        return objectDistance(toolPoint(tool, new Vector3f()), object);
+    }
+
+    private static float collisionGeometryDistance(rsim2.collision.CollisionShape shape, Matrix4f world, SceneNode object) {
+        if (shape instanceof rsim2.collision.CompoundShape compound) {
+            float distance = Float.POSITIVE_INFINITY;
+            for (var entry : compound.getChildren()) distance = Math.min(distance,
+                    collisionGeometryDistance(entry.getShape(), new Matrix4f(world).mul(entry.getLocalTransform()), object));
+            return distance;
+        }
+        Vector3f near = new Vector3f();
+        if (shape instanceof rsim2.collision.BoxShape) {
+            AABB local = shape.getLocalAABB();
+            new Matrix4f(world).invert().transformPosition(objectCenter(object), near).max(local.getMin()).min(local.getMax());
+            world.transformPosition(near);
+        } else {
+            Vector3f direction = objectCenter(object).sub(world.transformPosition(shape.getLocalAABB().getCenter()));
+            shape.getSupportPoint(direction, world, near);
+        }
+        return objectDistance(near, object);
+    }
+
+    public boolean isHeld(SceneNode object) { return originalParents.containsKey(object); }
+
+    /** Plans a world-up translation using the held object's center as the IK point. */
+    public String lift(SceneNode root, List<Joint> joints, String objectId, float height) {
+        SceneNode object = findNode(root, objectId);
+        if (!isHeld(object)) throw new IllegalArgumentException("Object is not held: " + objectId);
+        if (!Float.isFinite(height) || height <= 0) throw new IllegalArgumentException("Lift distance must be finite and positive.");
+        SceneNode tool = object.getParent();
+        List<Joint> chain = new ArrayList<>();
+        for (SceneNode n = tool; n != null; n = n.getParent())
+            for (Joint joint : joints) if (joint.getChildNode() == n && joint.getType() == JointType.REVOLUTE) chain.add(joint);
+        Vector3f center = objectCenter(object);
+        Vector3f offset = new Matrix4f(tool.getWorldTransform()).invert().transformPosition(new Vector3f(center));
+        Vector3f destination = new Vector3f(center).add(0, height, 0);
+        float[] start = angles(joints);
+        float[] solution = solve(chain, tool, offset, destination,
+                () -> motionGuard.collisionAtPose(root, joints) == null
+                        && motionGuard.validateStep(root, joints, start, angles(joints)) == null, false, Math.min(.005f, height * .1f));
+        if (solution == null) throw new IllegalArgumentException("No collision-free upward lift is reachable within joint limits; object remains held.");
+        for (int i = 0; i < chain.size(); i++) {
+            Joint joint = chain.get(i);
+            if (joint.getMotor() != null) joint.getMotor().setTargetAngleRadians(solution[i]);
+            else joint.setAngle(solution[i]);
+        }
+        return "Lifting " + objectId + " upward by " + height + " scene units.";
+    }
+
     /** Conservative tool envelope: keeps all tool/finger descendants outside the target. */
     private static List<Vector3f> graspTargets(SceneNode object, SceneNode tool, Vector3f offset) {
         AABB bounds = objectBounds(object);
@@ -236,10 +417,25 @@ public class ObjectInteractionController {
         List<Vector3f> targets = new ArrayList<>();
         // Try close surface points too: a sphere around a long tool excludes reachable
         // grasps unnecessarily. Actual geometry is still checked for every solution.
-        for (float fraction : new float[]{0, 0.25f, 0.5f, 1})
+        for (float fraction : new float[]{0, 0.25f, 0.5f, 0.625f, 0.75f, 1})
         for (int axis = 0; axis < 3; axis++) for (int sign : new int[]{1, -1}) {
             Vector3f point = new Vector3f(center);
-            point.setComponent(axis, center.get(axis) + sign * (half.get(axis) + radius * fraction + SURFACE_CLEARANCE));
+            point.setComponent(axis, center.get(axis) + sign * (half.get(axis) + radius * fraction + captureTolerance(object) * .5f));
+            targets.add(point);
+        }
+        for (int axis = 0; axis < 3; axis++) for (int sign : new int[]{1,-1}) {
+            Vector3f point = new Vector3f(center);
+            point.setComponent(axis, center.get(axis) + sign * (half.get(axis) + captureTolerance(object) * .9f));
+            targets.add(point);
+        }
+        // Face centers can place the wrist inside a wide object. Sample near
+        // face edges too, where the same real fingertip can approach freely.
+        for (int axis = 0; axis < 3; axis++) for (int sign : new int[]{1,-1})
+        for (int tangent = 0; tangent < 3; tangent++) if (tangent != axis)
+        for (int side : new int[]{1,-1}) {
+            Vector3f point = new Vector3f(center);
+            point.setComponent(axis, center.get(axis) + sign * (half.get(axis) + captureTolerance(object) * .5f));
+            point.setComponent(tangent, center.get(tangent) + side * half.get(tangent) * .8f);
             targets.add(point);
         }
         targets.sort(Comparator.comparingDouble(p -> p.distanceSquared(tcp)));
@@ -253,6 +449,10 @@ public class ObjectInteractionController {
     }
 
     private float[] solve(List<Joint> chain, SceneNode tool, Vector3f offset, Vector3f target, BooleanSupplier valid, boolean bestEffort) {
+        return solve(chain, tool, offset, target, valid, bestEffort, .005f);
+    }
+
+    private float[] solve(List<Joint> chain, SceneNode tool, Vector3f offset, Vector3f target, BooleanSupplier valid, boolean bestEffort, float tolerance) {
         float[] original = new float[chain.size()];
         for (int i = 0; i < chain.size(); i++) original[i] = chain.get(i).getCurrentAngleRadians();
         Random random = new Random(0);
@@ -267,7 +467,7 @@ public class ObjectInteractionController {
                 float step = 0.5f;
                 for (int pass = 0; pass < 300 && step >= 0.0005f; pass++) {
                     float before = toolPoint(tool, offset).distanceSquared(target);
-                    if (before <= 0.000025f) {
+                    if (before <= tolerance * tolerance) {
                         if (!valid.getAsBoolean()) break;
                         float[] result = new float[chain.size()];
                         for (int i = 0; i < chain.size(); i++) result[i] = chain.get(i).getCurrentAngleRadians();
@@ -352,7 +552,7 @@ public class ObjectInteractionController {
             return "Grasp cancelled: stopped or target/tool removed.";
         }
         if (approachPlayer != null) {
-            if (approachPlayer.getSequence() != approachSequence) {
+            if (approachPlayer.getSequence() != approachSequence || approachPlayer.getStopGeneration() != approachStopGeneration) {
                 cancelPending();
                 return "Grasp cancelled: another motion replaced the approach.";
             }
@@ -363,8 +563,9 @@ public class ObjectInteractionController {
             cancelPending();
             return "Grasp cancelled: object moved; request a new approach.";
         }
-        float tolerance = objectBounds(pendingObject).getHalfExtents().lengthSquared() == 0 ? CAPTURE_DISTANCE : 0.006f;
-        if (toolPoint(pendingTool, pendingOffset).distance(pendingTarget) <= tolerance) {
+        float tolerance = objectBounds(pendingObject).getHalfExtents().lengthSquared() == 0 ? CAPTURE_DISTANCE : captureTolerance(pendingObject) * .5f;
+        if (toolPoint(pendingTool, pendingOffset).distance(pendingTarget) <= tolerance
+                && canCapture(pendingObject, pendingTool, pendingOffset)) {
             String collision = motionGuard.collisionAtPose(root, sceneJoints);
             if (collision != null) {
                 cancelPending();
@@ -439,6 +640,7 @@ public class ObjectInteractionController {
     public void bindPlayback(MotionPlayer player, MotionSequence sequence) {
         approachPlayer = player;
         approachSequence = sequence;
+        approachStopGeneration = player.getStopGeneration();
     }
 
     private void clearPending() {

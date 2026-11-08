@@ -95,4 +95,42 @@ class EnvironmentMotionGuardTest {
         assertNotNull(guard.validateStep(root, List.of(joint), new float[]{0}, new float[]{1000}));
         assertEquals(0, joint.getCurrentAngleRadians());
     }
+
+    @Test void compoundFingerOpeningIsClearButEachTransformedFingerStillBlocks() {
+        var fingers = new rsim2.collision.CompoundShape();
+        var finger = new BoxShape(-.02f,-.1f,-.02f,.02f,.1f,.02f);
+        fingers.addShape(finger,new org.joml.Matrix4f().translation(-.08f,0,0));
+        fingers.addShape(finger,new org.joml.Matrix4f().translation(.08f,0,0));
+        tool.setCollisionShape(fingers);
+        SceneNode box = obstacle("box in opening",1,1,.03f);
+        assertNull(guard.collisionAtPose(root,List.of(joint)));
+        box.getLocalPosition().x = 1.08f;
+        assertNotNull(guard.collisionAtPose(root,List.of(joint)),"Decomposition must retain finger collision checks");
+        box.getLocalPosition().x = .92f;
+        assertNotNull(guard.collisionAtPose(root,List.of(joint)));
+    }
+
+    @Test void convexBoundsOverlapRequiresRealShapeIntersectionAtDifferentScales() {
+        for (float scale : new float[]{1, .001f, 100}) {
+            tool.setCollisionShape(new rsim2.collision.ConvexMeshShape(new float[]{
+                    0,0,0, 1,0,0, 0,1,0, 0,0,1}));
+            tool.getLocalScale().set(scale);
+            SceneNode box = obstacle("convex test " + scale, 1 + .8f * scale, 1 + .8f * scale, .05f * scale);
+            box.getLocalPosition().z = .8f * scale;
+            assertNull(guard.collisionAtPose(root,List.of(joint)), "Empty tetrahedron bounds must stay clear at scale " + scale);
+            box.getLocalPosition().set(1 + .15f * scale, 1 + .15f * scale, .15f * scale);
+            assertNotNull(guard.collisionAtPose(root,List.of(joint)), "Actual interior overlap must block at scale " + scale);
+            root.removeChild(box);
+        }
+    }
+
+    @Test void roundedShapesCannotLoseTheirRadiusDuringNarrowPhaseNormalization() {
+        tool.setCollisionShape(new rsim2.collision.SphereShape(.02f));
+        SceneNode box = obstacle("overlapping box", 1.025f, 1, .01f);
+        assertNotNull(guard.collisionAtPose(root, List.of(joint)));
+        tool.setCollisionShape(new rsim2.collision.CapsuleShape());
+        assertNotNull(guard.collisionAtPose(root, List.of(joint)));
+        box.getLocalPosition().x = 2;
+        assertNull(guard.collisionAtPose(root, List.of(joint)));
+    }
 }

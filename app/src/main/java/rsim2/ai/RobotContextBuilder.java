@@ -22,7 +22,7 @@ public class RobotContextBuilder {
         StringBuilder sb = new StringBuilder();
 
         sb.append("You are an expert robotics kinematics and motion planning assistant embedded in RSim2 (3D Robot Simulator & Sim2Real Studio).\n");
-        sb.append("You have full spatial awareness of the 3D scene, joint kinematics, forward kinematics (FK), collisions, and hardware controls.\n\n");
+        sb.append("You receive the scene state and kinematics below. Reachability and capture must be verified by the local planner; do not assume a target is reachable or a physical grip is proven.\n\n");
 
         sb.append("=== SCENE OBJECTS (world coordinates, scene units) ===\n");
         sb.append("No dynamics engine: grasping is a simulation-only kinematic attachment. Release holds the world pose; no gravity, force, friction or finger contact simulation.\n");
@@ -185,11 +185,12 @@ public class RobotContextBuilder {
         sb.append("```json\n{\"interaction\":{\"type\":\"approach\",\"object\":\"exact_object_id\",\"tool\":\"exact_robot_link_id\"}}\n```\n");
         sb.append("For 'approach the box and grasp it', emit the grasp JSON below: it performs both approach and attachment. A conversational promise alone cannot move the robot. Never claim execution before the simulator reports it.\n");
         sb.append("```json\n{\"interaction\":{\"type\":\"grasp\",\"object\":\"exact_object_id\",\"tool\":\"exact_robot_link_id\",\"tool_offset\":[0,0,0]}}\n```\n");
-        sb.append("tool_offset is an optional LOCAL point on the tool, in scene units; default is its origin. Only specify a different offset when the user supplies/calibrates the gripper TCP. Ask which tool if ambiguous.\n");
+        sb.append("tool_offset is an optional LOCAL calibrated point on the tool, in scene units. Omit it or use zero for the simulator-derived distal mesh tip (origin for a meshless tool). Only specify a nonzero offset when the user supplies/calibrates the gripper TCP. Ask which tool if ambiguous.\n");
         sb.append("The simulator chooses an external surface approach accounting for tool geometry, solves joint-limited IK and checks intermediate poses. It attaches only near the chosen external target without penetration. All motor/animation steps are checked against environment bounds; blocked motion is stopped. Report approaching until completion, not immediate success. Rejected goals do not change the pose.\n");
         sb.append("```json\n{\"interaction\":{\"type\":\"release\",\"object\":\"exact_object_id\"}}\n```\n");
-        sb.append("Once held, ordinary joint actions carry the object. Wait for grasp completion before issuing those actions. This does not command or verify a physical hardware gripper.\n");
+        sb.append("For grasp and lift, pick up, or kavra ve kaldır, emit interaction.type=grasp_and_lift with object, tool, and optional positive lift_distance (default 0.05 scene units, world +Y). The simulator waits for verified capture, plans a collision-checked upward lift, and reports completion only after measured object rise. Never split this into separate simultaneous grasp and joint commands. If already held, grasp_and_lift lifts the held object without regrasping. For lift-only of a held object use interaction.type=lift with object and optional lift_distance. Do not claim success from a loaded plan; report pending until simulator completion. This does not command or verify a physical hardware gripper.\n");
 
+        sb.append("```json\n{\"interaction\":{\"type\":\"grasp_and_lift\",\"object\":\"exact_object_id\",\"tool\":\"exact_robot_link_id\",\"lift_distance\":0.05}}\n```\n");
         return sb.toString();
     }
 

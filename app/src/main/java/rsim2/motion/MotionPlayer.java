@@ -13,6 +13,7 @@ public class MotionPlayer {
     private float playbackSpeed = 1.0f;
     private boolean isPlaying = false;
     private boolean isLooping = false;
+    private long stopGeneration;
     private List<Joint> controlledJoints = List.of();
 
     private final Map<String, Float> sampledAngles = new HashMap<>();
@@ -65,9 +66,12 @@ public class MotionPlayer {
     }
 
     public void stop() {
+        stopGeneration++;
         pause();
         currentTime = 0.0f;
     }
+
+    public long getStopGeneration() { return stopGeneration; }
 
     public void seek(float timeSeconds, List<Joint> joints) {
         bindJoints(joints);

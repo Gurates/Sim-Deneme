@@ -13,6 +13,7 @@ import rsim2.ai.AiActionExecutor;
 import rsim2.ai.AiConfig;
 import rsim2.ai.AiService;
 import rsim2.ai.RobotContextBuilder;
+import rsim2.ai.GraspLiftCoordinator;
 import rsim2.collision.CollisionWorld;
 import rsim2.core.Engine;
 import rsim2.editor.SelectionManager;
@@ -40,6 +41,8 @@ public class AIPanel {
     private MotionPlayer motionPlayer;
     private CollisionWorld collisionWorld;
     private ObjectInteractionController interactions = new ObjectInteractionController();
+    private final GraspLiftCoordinator graspLift = new GraspLiftCoordinator();
+    private long requestGeneration;
     private final ConcurrentLinkedQueue<Runnable> pendingResponses = new ConcurrentLinkedQueue<>();
 
     private final AiConfig config;
@@ -137,7 +140,11 @@ public class AIPanel {
     }
 
     public void setRootNode(SceneNode rootNode) {
-        if (this.rootNode != rootNode) interactions = new ObjectInteractionController();
+        if (this.rootNode != rootNode) {
+            graspLift.cancel("scene changed");
+            interactions = new ObjectInteractionController();
+            requestGeneration++;
+        }
         this.rootNode = rootNode;
     }
 
@@ -149,18 +156,28 @@ public class AIPanel {
                 response.run();
             } catch (RuntimeException error) {
                 interactions.cancelPending();
+                graspLift.cancel("command could not be applied");
                 reportAiError("Could not apply AI response", error);
             }
         }
         var safety = rsim2.bridge.BridgeManager.getInstance().getSafetyFilter();
+        String interrupted = graspLift.cancelIfInterrupted(rootNode, safety.isEmergencyStopActive());
+        if (interrupted != null) chatHistory.add(new ChatMessage("System", interrupted, false));
         String event = interactions.update(deltaTime, rootNode, safety.isEmergencyStopActive());
         if (event != null) {
             chatHistory.add(new ChatMessage("System", event, false));
             if (engine != null) engine.autoSaveProject();
         }
+        String taskEvent = graspLift.update(rootNode, safety.isEmergencyStopActive(), event);
+        if (taskEvent != null) {
+            chatHistory.add(new ChatMessage("System", taskEvent, false));
+            if (engine != null) engine.autoSaveProject();
+        }
     }
 
     public void onMotionBlocked(String reason) {
+        requestGeneration++;
+        graspLift.cancel("motion blocked: " + reason);
         interactions.cancelPending();
         chatHistory.add(new ChatMessage("System", "Motion stopped before collision: " + reason, false));
     }
@@ -414,8 +431,11 @@ public class AIPanel {
             return;
         }
         if (java.util.Set.of("dur", "durdur", "stop").contains(control)) {
+            requestGeneration++;
+            String cancelled = graspLift.cancel("stop requested");
+            if (cancelled != null) chatHistory.add(new ChatMessage("System", cancelled, false));
+            interactions.cancelPending();
             motionPlayer.stop();
-            motionPlayer.seek(0, joints);
             return;
         }
         isLoading = true;
@@ -433,22 +453,25 @@ public class AIPanel {
             return;
         }
         SceneNode requestedRoot = rootNode;
+        long requestedGeneration = requestGeneration;
+        long requestedStop = motionPlayer.getStopGeneration();
 
         aiService.sendMessageAsync(config, userPrompt, systemContext, new AiService.ResponseCallback() {
             @Override
             public void onSuccess(String responseText) {
                 pendingResponses.add(() -> {
-                    if (rootNode != requestedRoot) {
-                        chatHistory.add(new ChatMessage("System", "AI response discarded because the scene changed.", false));
+                    if (rootNode != requestedRoot || requestedGeneration != requestGeneration
+                            || requestedStop != motionPlayer.getStopGeneration()) {
+                        chatHistory.add(new ChatMessage("System", "AI response discarded because the scene changed or motion was stopped.", false));
                     } else {
                         AiActionExecutor.ExecutionResult execRes = AiActionExecutor.processAndExecute(
-                                responseText, joints, motionPlayer, rootNode, interactions);
+                                responseText, joints, motionPlayer, rootNode, interactions, graspLift);
                         if (!execRes.hasActions && execRes.appliedActions.isEmpty() && !commandRetry
                                 && AiActionExecutor.isMotionRequest(userPrompt)) {
                             chatHistory.add(new ChatMessage("System", "AI did not provide an executable command. Requesting the command; robot has not moved.", false));
                             requestResponse(userPrompt + "\n\nThe previous reply did not supply an executable command. "
                                     + "For the original requested motion, return exactly one JSON action using the action protocol and current scene IDs. "
-                                    + "For approach-and-grasp use interaction.type=grasp; it already performs the approach. "
+                                    + "For grasp and lift/pick up use interaction.type=grasp_and_lift; the simulator sequences capture then lift. For grasp only use interaction.type=grasp. "
                                     + "For closer/approach-only requests use interaction.type=approach, never grasp. A safe partial advance is supported. "
                                     + "Do not claim movement has started. If the target/tool is ambiguous or the request is informational, explain or ask for clarification instead of guessing.", true);
                             return;
@@ -471,6 +494,15 @@ public class AIPanel {
     }
 
     private String buildRobotSystemContext() {
-        return RobotContextBuilder.buildContext(rootNode, joints, collisionWorld, motionPlayer, interactions);
+        StringBuilder context = new StringBuilder(RobotContextBuilder.buildContext(rootNode, joints, collisionWorld, motionPlayer, interactions));
+        context.append("\nSimulator task: ").append(graspLift.state()).append("\n");
+        context.append("Recent conversation (historical statements may be stale; current scene state above is authoritative):\n");
+        synchronized (chatHistory) {
+            for (int i = Math.max(0, chatHistory.size() - 12); i < chatHistory.size(); i++) {
+                ChatMessage message = chatHistory.get(i);
+                context.append(message.sender).append(": ").append(message.text, 0, Math.min(1500, message.text.length())).append('\n');
+            }
+        }
+        return context.toString();
     }
 }

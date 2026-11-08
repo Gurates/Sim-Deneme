@@ -375,6 +375,8 @@ public class MjcfLoader {
             if (sizeAttr == null || sizeAttr.isEmpty()) {
                 sizeAttr = geomElem.getAttribute("size");
             }
+            String groupAttr = resolveAttribute(geomElem, "geom", "group", geomClass, classDefaults, globalDefaults);
+            boolean visible = groupAttr == null || groupAttr.isEmpty() || Integer.parseInt(groupAttr) <= 2;
 
             String fromtoAttr = resolveAttribute(geomElem, "geom", "fromto", geomClass, classDefaults, globalDefaults);
             if (fromtoAttr == null || fromtoAttr.isEmpty()) {
@@ -404,9 +406,11 @@ public class MjcfLoader {
                 float radius = sz[0];
                 float halfLen = sz.length > 1 ? sz[1] : 0.05f;
                 compoundShape.addShape(new CylinderShape(radius, halfLen * 2.0f), geomLocalTransform);
+                if (visible) bodyMeshes.add(Mesh.createTransformed(PrimitiveMeshFactory.cylinder(radius, halfLen), geomLocalTransform));
             } else if ("box".equalsIgnoreCase(geomType)) {
                 float[] sz = parseFloats(sizeAttr, 3, 0.02f);
                 compoundShape.addShape(new BoxShape(new Vector3f(-sz[0], -sz[1], -sz[2]), new Vector3f(sz[0], sz[1], sz[2])), geomLocalTransform);
+                if (visible) bodyMeshes.add(Mesh.createTransformed(PrimitiveMeshFactory.box(sz[0], sz[1], sz[2]), geomLocalTransform));
             }
 
             String geomMeshName = resolveAttribute(geomElem, "geom", "mesh", geomClass, classDefaults, globalDefaults);
@@ -435,8 +439,10 @@ public class MjcfLoader {
                                 m = Mesh.createScaled(m, meshScale);
                             }
                             m.setSourcePath(path);
-                            bodyMeshes.add(m);
-                            compoundShape.addShape(new ConvexMeshShape(m), geomLocalTransform);
+                            compoundShape.addShape(new ConvexMeshShape(m.getVertices()), geomLocalTransform);
+                            // Each geom has its own frame; body transforms alone cannot assemble it.
+                            if (visible) bodyMeshes.add(Mesh.createTransformed(m, geomLocalTransform));
+                            else m.cleanup();
                         }
                     } catch (Exception ex) {
                         System.err.println("Warning: failed to load MuJoCo mesh: " + resolved.getAbsolutePath() + " (" + ex.getMessage() + ")");
@@ -455,7 +461,7 @@ public class MjcfLoader {
             bodyNode.setCollisionShape(compoundShape);
         } else if (!bodyMeshes.isEmpty()) {
             for (Mesh bm : bodyMeshes) {
-                compoundShape.addShape(new ConvexMeshShape(bm));
+                compoundShape.addShape(new ConvexMeshShape(bm.getVertices()));
             }
             bodyNode.setCollisionShape(compoundShape);
         }
@@ -467,6 +473,7 @@ public class MjcfLoader {
         result.linksById.put(bodyName, bodyNode);
 
         if (parentNode != null) {
+            boolean hasJoint = false;
             NodeList bChildren = bodyElem.getChildNodes();
             for (int i = 0; i < bChildren.getLength(); i++) {
                 Node jNode = bChildren.item(i);
@@ -516,7 +523,12 @@ public class MjcfLoader {
                 Joint joint = new Joint(jointName, parentNode, bodyNode, JointType.REVOLUTE, axis);
                 joint.setLimits(lowerLimit, upperLimit, 2.5f);
                 result.joints.add(joint);
+                hasJoint = true;
                 break;
+            }
+            if (!hasJoint) {
+                result.joints.add(new Joint(parentNode.getId() + "_" + bodyName + "_fixed",
+                        parentNode, bodyNode, JointType.FIXED, new Vector3f(0, 0, 1)));
             }
 
             parentNode.addChild(bodyNode);

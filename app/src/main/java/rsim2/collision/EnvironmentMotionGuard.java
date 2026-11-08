@@ -15,7 +15,7 @@ public final class EnvironmentMotionGuard {
     private static final float EPS = 0.00001f;
     private static final int MAX_SAMPLES = 10000;
 
-    private record Body(SceneNode node, SceneNode environment, boolean movable, AABB local) {}
+    private record Body(SceneNode node, SceneNode environment, boolean movable, AABB local, CollisionShape shape, Matrix4f localTransform) {}
     private record Bounds(OBB box, Matrix4f transform) {}
 
     /** Returns a reason for rejecting this joint step, or null. Restores the input pose. */
@@ -92,20 +92,32 @@ public final class EnvironmentMotionGuard {
         if (environment == null && !node.isRobotPart()) environment = node;
         movable |= roots.contains(node);
         if (node.getCollisionShape() != null) {
-            AABB local = node.getCollisionShape().getLocalAABB();
-            if (local.isValid()) result.add(new Body(node, environment, movable, local));
+            collectShape(node, environment, movable, node.getCollisionShape(), new Matrix4f(), result);
         } else for (var mesh : node.getMeshes()) {
             // Combining separate finger meshes into one box fills the open gripper gap.
             AABB local = new AABB(mesh.getMinBound(), mesh.getMaxBound());
-            if (local.isValid()) result.add(new Body(node, environment, movable, local));
+            if (local.isValid()) result.add(new Body(node, environment, movable, local, new ConvexMeshShape(mesh.getVertices()), new Matrix4f()));
         }
         for (SceneNode child : node.getChildren()) collect(child, environment, movable, roots, result);
+    }
+
+    private static void collectShape(SceneNode node, SceneNode environment, boolean movable,
+                                     CollisionShape shape, Matrix4f localTransform, List<Body> result) {
+        if (shape instanceof CompoundShape compound) {
+            // Preserve real openings between imported collision parts. A single
+            // enclosing box falsely fills the gripper gap and blocks contact.
+            for (var entry : compound.getChildren()) collectShape(node, environment, movable,
+                    entry.getShape(), new Matrix4f(localTransform).mul(entry.getLocalTransform()), result);
+        } else {
+            AABB local = shape.getLocalAABB();
+            if (local.isValid()) result.add(new Body(node, environment, movable, local, shape, localTransform));
+        }
     }
 
     private static List<Bounds> bounds(List<Body> bodies) {
         List<Bounds> result = new ArrayList<>(bodies.size());
         for (Body body : bodies) {
-            Matrix4f transform = body.node.getWorldTransform();
+            Matrix4f transform = body.node.getWorldTransform().mul(body.localTransform);
             OBB box = new OBB();
             box.fromAABBAndTransform(body.local, transform);
             // Nonuniformly scaled, rotated ancestors may introduce shear. An AABB encloses it safely.
@@ -140,17 +152,32 @@ public final class EnvironmentMotionGuard {
                 if (a.environment != null && a.environment == b.environment) continue;
                 if (!a.movable && !b.movable) continue;
                 float overlap = penetration(ba.box, current.get(j).box);
-                if (overlap <= EPS) continue; // Surface contact is allowed, interior overlap is not.
+                if (overlap <= EPS || !intersects(a, ba, b, current.get(j))) continue;
                 if (previous != null) {
                     if (ba.transform.equals(previous.get(i).transform, 1e-7f)
                             && current.get(j).transform.equals(previous.get(j).transform, 1e-7f)) continue;
                     float oldOverlap = penetration(previous.get(i).box, previous.get(j).box);
-                    if (oldOverlap > EPS && overlap < oldOverlap - EPS) continue;
+                    if (oldOverlap > EPS && intersects(a, previous.get(i), b, previous.get(j)) && overlap < oldOverlap - EPS) continue;
                 }
                 return a.node.getId() + " intersects " + b.node.getId() + ".";
             }
         }
         return null;
+    }
+
+    // Bounds are broad phase only: a bent/rounded jaw need not fill its box.
+    private static boolean intersects(Body a, Bounds ba, Body b, Bounds bb) {
+        // These support maps currently express their radii in world units.
+        // Normalizing their transforms would shrink the effective radius and
+        // miss real collisions. Retain the conservative broad-phase result.
+        if (a.shape instanceof SphereShape || a.shape instanceof CapsuleShape
+                || b.shape instanceof SphereShape || b.shape instanceof CapsuleShape) return true;
+        Vector3f center = new Vector3f(ba.box.getCenter()).add(bb.box.getCenter()).mul(.5f);
+        float size = Math.max(ba.box.getHalfExtents().length(), bb.box.getHalfExtents().length());
+        // GJK's absolute numerical thresholds need a stable geometry scale.
+        Matrix4f normalize = new Matrix4f().scaling(100f / Math.max(size, .0001f)).translate(center.negate());
+        return CollisionMath.intersectGJKConservative(a.shape, new Matrix4f(normalize).mul(ba.transform),
+                b.shape, new Matrix4f(normalize).mul(bb.transform));
     }
 
     /** Minimum normalized separating-axis overlap; negative means separated. */

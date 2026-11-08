@@ -75,6 +75,28 @@ test {
     useJUnitPlatform()
 }
 
+// Windows Java launchers can decode Gradle's UTF-8 argument file using the
+// system code page. Keep the worker classpath ASCII; manifest URLs preserve
+// non-ASCII project paths without copying or changing the compiled classes.
+if (osName.contains('win') && rootProject.projectDir.absolutePath.any { it > '\u007f' }) {
+    def testRuntimeFiles = sourceSets.test.runtimeClasspath
+    def testClasspathJar = tasks.register('testClasspathJar', Jar) {
+        dependsOn tasks.named('testClasses')
+        archiveFileName = 'test-classpath.jar'
+        destinationDirectory = new File(gradle.gradleUserHomeDir,
+                'caches/rsim2/' + Integer.toHexString(rootProject.projectDir.absolutePath.hashCode()))
+        inputs.files(testRuntimeFiles)
+        doFirst {
+            manifest.attributes('Class-Path': testRuntimeFiles.files
+                    .collect { it.toURI().toASCIIString() }.join(' '))
+        }
+    }
+    tasks.named('test') {
+        dependsOn testClasspathJar
+        classpath = files(testClasspathJar.flatMap { it.archiveFile })
+    }
+}
+
 tasks.register('testSimToReal', JavaExec) {
     group = 'verification'
     description = 'Runs the SimToRealBridgeTest suite'

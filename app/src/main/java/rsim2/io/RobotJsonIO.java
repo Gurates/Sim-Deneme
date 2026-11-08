@@ -2,6 +2,7 @@ package rsim2.io;
 
 import com.google.gson.*;
 import org.joml.Vector3f;
+import org.joml.Matrix4f;
 import rsim2.data.*;
 import rsim2.graphics.Mesh;
 import rsim2.scene.Joint;
@@ -90,7 +91,9 @@ public class RobotJsonIO {
             link.id = node.getId();
 
             List<String> meshPaths = new ArrayList<>();
+            link.meshTransforms = new ArrayList<>();
             for (Mesh m : node.getMeshes()) {
+                link.meshTransforms.add(m.getSourceTransform().get(new float[16]));
                 String rawPath = m.getSourcePath();
                 if (rawPath == null || rawPath.isEmpty()) {
                     rawPath = node.getSourceMeshPath();
@@ -165,6 +168,7 @@ public class RobotJsonIO {
     }
 
     private static String makeRelativePath(String jsonDir, String targetPath) {
+        if (targetPath.startsWith("primitive:")) return targetPath;
         try {
             File targetFile = new File(targetPath);
             if (!targetFile.isAbsolute()) {
@@ -213,17 +217,34 @@ public class RobotJsonIO {
             }
 
             List<Mesh> loadedMeshes = new ArrayList<>();
-            for (String rawPath : rawPaths) {
+            for (int meshIndex = 0; meshIndex < rawPaths.size(); meshIndex++) {
+                String rawPath = rawPaths.get(meshIndex);
                 String resolved = resolveMeshPath(rawPath, jsonFileDirectory);
                 Mesh mesh;
                 String lower = resolved.toLowerCase();
-                if (lower.endsWith(".stl")) {
+                if (rawPath.startsWith("primitive:")) {
+                    String[] parts = rawPath.split(":");
+                    if (parts.length == 5 && "box".equals(parts[1])) {
+                        mesh = PrimitiveMeshFactory.box(Float.parseFloat(parts[2]), Float.parseFloat(parts[3]), Float.parseFloat(parts[4]));
+                    } else if (parts.length == 4 && "cylinder".equals(parts[1])) {
+                        mesh = PrimitiveMeshFactory.cylinder(Float.parseFloat(parts[2]), Float.parseFloat(parts[3]));
+                    } else {
+                        throw new IllegalArgumentException("Unsupported primitive mesh: " + rawPath);
+                    }
+                    resolved = rawPath;
+                } else if (lower.endsWith(".stl")) {
                     mesh = StlLoader.load(resolved);
                 } else {
                     mesh = ObjLoader.load(resolved);
                 }
                 if (mesh != null) {
                     mesh.setSourcePath(resolved);
+                    if (link.meshTransforms != null && meshIndex < link.meshTransforms.size()) {
+                        float[] transform = link.meshTransforms.get(meshIndex);
+                        if (transform != null && transform.length == 16) {
+                            mesh = Mesh.createTransformed(mesh, new Matrix4f().set(transform));
+                        }
+                    }
                     loadedMeshes.add(mesh);
                 }
             }

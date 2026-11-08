@@ -1,6 +1,8 @@
 package rsim2.graphics;
 
 import org.joml.Vector3f;
+import org.joml.Matrix4f;
+import org.joml.Matrix3f;
 import org.lwjgl.BufferUtils;
 import org.lwjgl.opengl.GL;
 
@@ -25,6 +27,7 @@ public class Mesh {
     private final float[] normals;
     private final int[] indices;
     private String sourcePath;
+    private final Matrix4f sourceTransform = new Matrix4f();
 
     public Mesh(float[] vertices, float[] normals, int[] indices) {
         this(vertices, normals, indices, null);
@@ -105,6 +108,12 @@ public class Mesh {
             return original;
         }
 
+        return createTransformed(original, new Matrix4f().scaling(scale));
+    }
+
+    /** Bakes a visual-local transform without changing the owning link/joint frame. */
+    public static Mesh createTransformed(Mesh original, Matrix4f transform) {
+        if (original == null) return null;
         float[] origVerts = original.getVertices();
         if (origVerts == null || origVerts.length == 0) {
             return original;
@@ -112,14 +121,30 @@ public class Mesh {
 
         float[] scaledVerts = new float[origVerts.length];
         for (int i = 0; i < origVerts.length; i += 3) {
-            scaledVerts[i] = origVerts[i] * scale.x;
-            if (i + 1 < origVerts.length) scaledVerts[i + 1] = origVerts[i + 1] * scale.y;
-            if (i + 2 < origVerts.length) scaledVerts[i + 2] = origVerts[i + 2] * scale.z;
+            Vector3f p = transform.transformPosition(new Vector3f(origVerts[i], origVerts[i + 1], origVerts[i + 2]));
+            scaledVerts[i] = p.x;
+            scaledVerts[i + 1] = p.y;
+            scaledVerts[i + 2] = p.z;
         }
-
-        Mesh scaled = new Mesh(scaledVerts, original.getNormals(), original.getIndices(), original.getSourcePath());
+        float[] transformedNormals = original.getNormals() == null ? null : original.getNormals().clone();
+        Matrix3f normalMatrix = transform.normal(new Matrix3f());
+        if (transformedNormals != null) {
+            for (int i = 0; i < transformedNormals.length; i += 3) {
+                Vector3f n = normalMatrix.transform(new Vector3f(transformedNormals[i], transformedNormals[i + 1], transformedNormals[i + 2]));
+                if (n.lengthSquared() > 0) n.normalize();
+                transformedNormals[i] = n.x;
+                transformedNormals[i + 1] = n.y;
+                transformedNormals[i + 2] = n.z;
+            }
+        }
+        Mesh scaled = new Mesh(scaledVerts, transformedNormals, original.getIndices(), original.getSourcePath());
+        scaled.sourceTransform.set(transform).mul(original.sourceTransform);
         original.cleanup();
         return scaled;
+    }
+
+    public Matrix4f getSourceTransform() {
+        return new Matrix4f(sourceTransform);
     }
 
     public void render() {
