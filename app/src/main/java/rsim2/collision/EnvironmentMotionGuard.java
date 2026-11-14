@@ -8,9 +8,7 @@ import rsim2.scene.SceneNode;
 
 import java.util.*;
 
-/** Conservative geometry guard, independent of display/diagnostic collision filters.
- * Uses oriented bounds (world AABBs for sheared transforms), not finger contact forces.
- */
+
 public final class EnvironmentMotionGuard {
     private static final float EPS = 0.00001f;
     private static final int MAX_SAMPLES = 10000;
@@ -18,7 +16,7 @@ public final class EnvironmentMotionGuard {
     private record Body(SceneNode node, SceneNode environment, boolean movable, AABB local, CollisionShape shape, Matrix4f localTransform) {}
     private record Bounds(OBB box, Matrix4f transform) {}
 
-    /** Returns a reason for rejecting this joint step, or null. Restores the input pose. */
+
     public String validateStep(SceneNode root, List<Joint> joints, float[] before, float[] after) {
         if (root == null || joints == null) return null;
         if (before.length != joints.size() || after.length != joints.size()) return "Invalid motion sample size.";
@@ -50,8 +48,8 @@ public final class EnvironmentMotionGuard {
                 }
                 travel += delta * radius;
             }
-            // Resolution follows geometry scale. A hard 0.002 scene-unit cap made
-            // scaled robots exceed MAX_SAMPLES on otherwise ordinary movements.
+
+
             double distanceStep = Math.max(0.0001, smallest * 0.5);
             double required = Math.max(Math.ceil(angularTravel / 0.01), Math.ceil(travel / distanceStep));
             if (!Double.isFinite(required) || required > MAX_SAMPLES) return "Motion step is too large to collision-check safely.";
@@ -69,7 +67,7 @@ public final class EnvironmentMotionGuard {
         }
     }
 
-    /** Checks the final pose without permitting initial overlaps. */
+
     public String collisionAtPose(SceneNode root, List<Joint> joints) {
         if (root == null) return null;
         List<Body> bodies = bodies(root, joints == null ? List.of() : joints);
@@ -105,7 +103,7 @@ public final class EnvironmentMotionGuard {
                                      CollisionShape shape, Matrix4f localTransform, List<Body> result) {
         if (shape instanceof CompoundShape compound) {
             // Preserve real openings between imported collision parts. A single
-            // enclosing box falsely fills the gripper gap and blocks contact.
+
             for (var entry : compound.getChildren()) collectShape(node, environment, movable,
                     entry.getShape(), new Matrix4f(localTransform).mul(entry.getLocalTransform()), result);
         } else {
@@ -141,14 +139,14 @@ public final class EnvironmentMotionGuard {
             if (checkGround && a.movable && ba.box.getMinY() < -EPS) {
                 boolean unchanged = previous != null && ba.transform.equals(previous.get(i).transform, 1e-7f);
                 // Imported bases can already sit a little below the floor. Rotation along the
-                // floor must remain possible; reject only new or deeper penetration.
+
                 boolean escaping = previous != null && previous.get(i).box.getMinY() < -EPS
                         && ba.box.getMinY() >= previous.get(i).box.getMinY() - EPS;
                 if (!unchanged && !escaping) return a.node.getId() + " intersects the ground.";
             }
             for (int j = i + 1; j < bodies.size(); j++) {
                 Body b = bodies.get(j);
-                if (a.environment == null && b.environment == null) continue; // Robot self-collision belongs to CollisionWorld.
+                if (a.environment == null && b.environment == null) continue;
                 if (a.environment != null && a.environment == b.environment) continue;
                 if (!a.movable && !b.movable) continue;
                 float overlap = penetration(ba.box, current.get(j).box);
@@ -165,11 +163,11 @@ public final class EnvironmentMotionGuard {
         return null;
     }
 
-    // Bounds are broad phase only: a bent/rounded jaw need not fill its box.
+
     private static boolean intersects(Body a, Bounds ba, Body b, Bounds bb) {
         // These support maps currently express their radii in world units.
         // Normalizing their transforms would shrink the effective radius and
-        // miss real collisions. Retain the conservative broad-phase result.
+
         if (a.shape instanceof SphereShape || a.shape instanceof CapsuleShape
                 || b.shape instanceof SphereShape || b.shape instanceof CapsuleShape) return true;
         Vector3f center = new Vector3f(ba.box.getCenter()).add(bb.box.getCenter()).mul(.5f);
@@ -180,7 +178,7 @@ public final class EnvironmentMotionGuard {
                 b.shape, new Matrix4f(normalize).mul(bb.transform));
     }
 
-    /** Minimum normalized separating-axis overlap; negative means separated. */
+
     private static float penetration(OBB a, OBB b) {
         float minimum = Float.POSITIVE_INFINITY;
         List<Vector3f> axes = new ArrayList<>(15);

@@ -1,6 +1,8 @@
 package rsim2.motion;
 
 import rsim2.scene.Joint;
+import rsim2.scene.ObjectInteractionController;
+import rsim2.scene.SceneNode;
 
 import java.util.HashMap;
 import java.util.List;
@@ -15,6 +17,9 @@ public class MotionPlayer {
     private boolean isLooping = false;
     private long stopGeneration;
     private long seekGeneration;
+    private boolean replayingEvents;
+    private int nextEvent;
+    private int nextReplayFrame;
     private List<Joint> controlledJoints = List.of();
 
     private final Map<String, Float> sampledAngles = new HashMap<>();
@@ -23,11 +28,12 @@ public class MotionPlayer {
     }
 
     public void loadSequence(MotionSequence sequence) {
+        isPlaying = false;
         this.sequence = sequence;
         this.currentTime = 0.0f;
-        if (sequence != null) {
-            this.isLooping = sequence.isLoop();
-        }
+        this.isLooping = sequence != null && sequence.isLoop();
+        replayingEvents = false;
+        nextEvent = 0;
     }
 
     public MotionSequence getSequence() {
@@ -42,6 +48,11 @@ public class MotionPlayer {
         if (!hasSequence()) return;
         if (currentTime >= sequence.getDurationSeconds() && !isLooping) {
             currentTime = 0.0f;
+        }
+        if (!replayingEvents && currentTime == 0.0f && !sequence.isIncomplete() && !sequence.getEvents().isEmpty()) {
+            replayingEvents = true;
+            nextEvent = 0;
+            nextReplayFrame = 0;
         }
         isPlaying = true;
     }
@@ -69,6 +80,8 @@ public class MotionPlayer {
     public void stop() {
         stopGeneration++;
         pause();
+        replayingEvents = false;
+        nextEvent = 0;
         currentTime = 0.0f;
     }
 
@@ -77,7 +90,7 @@ public class MotionPlayer {
 
     public void seek(float timeSeconds, List<Joint> joints) {
         bindJoints(joints);
-        if (!hasSequence()) return;
+        if (!hasSequence() || sequence.isIncomplete() || !sequence.getEvents().isEmpty()) return;
         seekGeneration++;
         this.currentTime = Math.max(0.0f, Math.min(sequence.getDurationSeconds(), timeSeconds));
         applyCurrentFrame(joints);
@@ -89,7 +102,20 @@ public class MotionPlayer {
             return;
         }
 
-        currentTime += deltaTime * playbackSpeed;
+        float nextTime = currentTime + deltaTime * playbackSpeed;
+        if (replayingEvents) {
+            if (nextEvent < sequence.getEvents().size()) {
+                nextTime = Math.min(nextTime, sequence.getEvents().get(nextEvent).timeSeconds());
+            }
+            List<Keyframe> frames = sequence.getKeyframes();
+            if (nextReplayFrame < frames.size() && nextTime >= frames.get(nextReplayFrame).getTimeSeconds()) {
+                nextTime = frames.get(nextReplayFrame).getTimeSeconds();
+                do {
+                    nextReplayFrame++;
+                } while (nextReplayFrame < frames.size() && frames.get(nextReplayFrame).getTimeSeconds() == nextTime);
+            }
+        }
+        currentTime = nextTime;
 
         float duration = sequence.getDurationSeconds();
         if (currentTime >= duration) {
@@ -102,6 +128,27 @@ public class MotionPlayer {
         }
 
         applyCurrentFrame(joints);
+    }
+
+    public boolean isReplayingEvents() { return replayingEvents; }
+
+    public boolean startsNewPlayback() {
+        return !replayingEvents && (currentTime == 0.0f || currentTime >= getDuration());
+    }
+
+    public void cancelReplay() {
+        if (replayingEvents) stop();
+    }
+
+
+    public void applyReplayEvents(SceneNode root, List<Joint> joints, ObjectInteractionController interactions) {
+        if (!replayingEvents) return;
+        List<MotionEvent> events = sequence.getEvents();
+        while (nextEvent < events.size() && events.get(nextEvent).timeSeconds() <= currentTime) {
+            events.get(nextEvent).apply(root, joints, interactions);
+            nextEvent++;
+        }
+        if (currentTime >= sequence.getDurationSeconds()) replayingEvents = false;
     }
 
     private void applyCurrentFrame(List<Joint> joints) {
@@ -169,9 +216,11 @@ public class MotionPlayer {
     }
 
     public void setLooping(boolean looping) {
-        this.isLooping = looping;
         if (sequence != null) {
             sequence.setLoop(looping);
+            this.isLooping = sequence.isLoop();
+        } else {
+            this.isLooping = looping;
         }
     }
 }

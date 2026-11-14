@@ -1,12 +1,16 @@
 package rsim2.motion;
 
 import java.util.*;
+import rsim2.scene.ObjectInteractionController;
+import rsim2.scene.SceneNode;
 
 public class MotionSequence {
     private String name = "Unnamed Motion";
     private float durationSeconds = 1.0f;
     private boolean loop = false;
     private final List<Keyframe> keyframes = new ArrayList<>();
+    private final List<MotionEvent> events = new ArrayList<>();
+    private transient boolean incomplete;
 
     public MotionSequence() {
     }
@@ -38,7 +42,51 @@ public class MotionSequence {
     }
 
     public void setLoop(boolean loop) {
-        this.loop = loop;
+        this.loop = loop && events.isEmpty();
+    }
+
+    public List<MotionEvent> getEvents() {
+        return Collections.unmodifiableList(events);
+    }
+
+    public void addEvent(MotionEvent event) {
+        events.add(event);
+        events.sort(Comparator.comparingDouble(MotionEvent::timeSeconds));
+        loop = false;
+    }
+
+    public boolean isIncomplete() { return incomplete; }
+
+    public void setIncomplete(boolean incomplete) { this.incomplete = incomplete; }
+
+    public void validateReplay(SceneNode root, ObjectInteractionController interactions) {
+        Set<String> checkedObjects = new HashSet<>();
+        for (MotionEvent event : events) {
+            SceneNode object = ObjectInteractionController.findNode(root, event.objectId());
+            if (object == null || object == root || object.isRobotPart()) {
+                throw new IllegalArgumentException("Motion object is missing: " + event.objectId());
+            }
+            if (event.toolId() != null) {
+                SceneNode tool = ObjectInteractionController.findNode(root, event.toolId());
+                if (tool == null || tool == root || !tool.isRobotPart()) {
+                    throw new IllegalArgumentException("Motion tool is missing: " + event.toolId());
+                }
+            }
+            if (checkedObjects.add(event.objectId()) && (event.toolId() == null) != interactions.isHeld(object)) {
+                throw new IllegalArgumentException(event.toolId() == null ? "Hold " + event.objectId() + " before playback."
+                        : "Release " + event.objectId() + " and return it to its starting position before playback.");
+            }
+        }
+    }
+
+    public void appendKeyframes(MotionSequence continuation) {
+        float start = durationSeconds;
+        for (Keyframe frame : continuation.keyframes) {
+            if (frame.getTimeSeconds() > 0) {
+                addKeyframe(new Keyframe(start + frame.getTimeSeconds(), frame.getJointAnglesDegrees()));
+            }
+        }
+        setDurationSeconds(start + continuation.durationSeconds);
     }
 
     public List<Keyframe> getKeyframes() {

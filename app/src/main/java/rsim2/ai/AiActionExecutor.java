@@ -20,7 +20,7 @@ import java.util.regex.Pattern;
 
 public class AiActionExecutor {
     public static boolean isMotionRequest(String prompt) {
-        return prompt != null && Pattern.compile("(?iu)\\b(hareket|tut|yakala|kavra|bırak|birak|taşı|tasi|döndür|dondur|kaldır|kaldir|move|lift|grasp|grab|pick|release|rotate|home)\\b").matcher(prompt).find();
+        return prompt != null && Pattern.compile("(?iu)\\b(hareket|tut|yakala|kavra|bırak|birak|taşı|tasi|döndür|dondur|kaldır|kaldir|yaklaş|yaklas|move|lift|grasp|grab|pick|release|rotate|home)\\b").matcher(prompt).find();
     }
 
     private static final Pattern JSON_BLOCK_PATTERN = Pattern.compile("```(?:json|action)?\\s*(\\{[\\s\\S]*?\\})\\s*```", Pattern.CASE_INSENSITIVE);
@@ -59,6 +59,10 @@ public class AiActionExecutor {
         if (matcher.find()) {
             matchedBlock = matcher.group(0);
             jsonContent = matcher.group(1);
+            if (matcher.find()) {
+                result.cleanedMessage = "[Command rejected] Submit one complete motion as a single JSON command.";
+                return result;
+            }
         } else {
             Matcher actionStart = Pattern.compile("\\{\\s*\"(?:pose|actions|animation|trajectory|keyframes|system|interaction)\"\\s*:").matcher(rawResponse);
             int startIdx = actionStart.find() ? actionStart.start() : -1;
@@ -106,7 +110,9 @@ public class AiActionExecutor {
                             result.hasAnimation = true;
                         } else if ("grasp".equals(type) || "approach".equals(type)) {
                             if (task != null && task.isActive()) throw new IllegalArgumentException("Stop the active grasp-and-lift task before planning another interaction.");
-                            if (motionPlayer != null && motionPlayer.isPlaying()) throw new IllegalArgumentException("Pause the current motion before planning a new approach or grasp.");
+                            if (motionPlayer != null && (motionPlayer.isPlaying() || motionPlayer.isReplayingEvents())) {
+                                throw new IllegalArgumentException("Finish or stop the current motion before planning a new approach or grasp.");
+                            }
                             Vector3f offset = new Vector3f();
                             if (action.has("tool_offset")) {
                                 JsonArray a = action.getAsJsonArray("tool_offset");
@@ -117,17 +123,22 @@ public class AiActionExecutor {
                                     ? interactions.approach(root, joints, objectId, action.get("tool").getAsString(), offset)
                                     : interactions.grasp(root, joints, objectId, action.get("tool").getAsString(), offset);
                             if (motionPlayer != null) {
-                                MotionSequence approach = rsim2.motion.JointMotion.fromTargets(type + " " + objectId, joints, startAngles);
+                                boolean grasp = "grasp".equals(type);
+                                MotionSequence approach = grasp
+                                        ? rsim2.motion.JointMotion.forInteraction(type + " " + objectId, joints, startAngles)
+                                        : rsim2.motion.JointMotion.fromTargets(type + " " + objectId, joints, startAngles);
                                 if (approach != null) {
+                                    approach.setIncomplete(grasp);
                                     motionPlayer.loadSequence(approach);
                                     motionPlayer.play();
-                                    if ("grasp".equals(type)) interactions.bindPlayback(motionPlayer, approach);
+                                    if (grasp) interactions.bindPlayback(motionPlayer, approach, true);
                                     result.generatedSequence = approach;
                                     result.hasAnimation = true;
                                 }
                             }
                         } else if ("release".equals(type)) {
                             if (task != null) task.cancel("release requested");
+                            if (motionPlayer != null) motionPlayer.cancelReplay();
                             message = interactions.release(root, objectId);
                         } else throw new IllegalArgumentException("Unknown interaction type: " + type);
                         result.appliedActions.add("[Interaction] " + message);
@@ -139,6 +150,7 @@ public class AiActionExecutor {
                         || obj.has("trajectory") || obj.has("keyframes") || obj.has("system"))) {
                     interactions.cancelPending();
                     if (task != null) task.cancel("another robot command was requested");
+                    if (motionPlayer != null) motionPlayer.cancelReplay();
                 }
 
                 // Mixed commands are rejected above and must not execute their motion half.

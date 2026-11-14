@@ -15,7 +15,7 @@ import java.util.Locale;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
-/** Local Streamable HTTP transport. JSON replies are sufficient; no SSE stream is opened. */
+
 public final class McpHttpEndpoint implements AutoCloseable {
     public record Connection(String url, String token) {}
     private static final int MAX_REQUEST_BYTES = 262144;
@@ -104,7 +104,7 @@ public final class McpHttpEndpoint implements AutoCloseable {
         byte[] bytes = new byte[32];
         new SecureRandom().nextBytes(bytes);
         String token = HexFormat.of().formatHex(bytes);
-        // createTempFile uses restricted permissions on POSIX; Windows inherits the user's directory ACL.
+
         Path temporary = Files.createTempFile(file.getParent(), "mcp-http-", ".tmp");
         try {
             Files.writeString(temporary, token, StandardOpenOption.TRUNCATE_EXISTING);

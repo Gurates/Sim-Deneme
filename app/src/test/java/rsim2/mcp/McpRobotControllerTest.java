@@ -103,7 +103,7 @@ class McpRobotControllerTest {
         player.update(1, joints);
         assertEquals(current, joint.getCurrentAngleRadians());
         call("move_joints", "{\"targets_degrees\":{\"shoulder\":10}}");
-        player.pause(); // Engine pauses playback when collision validation rejects a step.
+        player.pause();
         controller.afterStep(root, joints, player, "obstacle");
         assertEquals("blocked", call("get_task_status", "{}").get("state").getAsString());
     }

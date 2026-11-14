@@ -50,6 +50,11 @@ class TopDownPickTest {
             assertSame(sequence,player.getSequence(),"All phases share one motion sequence");
         }
         assertEquals("completed",call("get_task_status","{}").get("state").getAsString());
+        assertFalse(sequence.isIncomplete());
+        assertEquals(1, sequence.getEvents().size());
+        assertEquals("box", sequence.getEvents().getFirst().objectId());
+        assertEquals("tool", sequence.getEvents().getFirst().toolId());
+        assertTrue(sequence.getEvents().getFirst().timeSeconds() < sequence.getDurationSeconds());
         assertSame(tool,box.getParent());
         assertTrue(ObjectInteractionController.objectCenter(box).y-initialY>=.095f);
         assertTrue(TopDownPickPlanner.direction(tool,new Vector3f(1,0,0)).dot(new Vector3f(0,-1,0))>.999f);

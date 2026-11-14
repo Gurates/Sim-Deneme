@@ -4,7 +4,7 @@ import com.google.gson.*;
 import java.io.IOException;
 import java.nio.file.*;
 
-/** Stable discovery path; credentials remain local and rotate with each live session. */
+
 public record McpSession(int port, String token) {
     public static Path defaultFile() {
         return Path.of(System.getProperty("user.home"), ".rsim2", "mcp-session.json").toAbsolutePath();

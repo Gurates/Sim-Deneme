@@ -7,7 +7,7 @@ import rsim2.collision.EnvironmentMotionGuard;
 import rsim2.scene.*;
 import java.util.*;
 
-/** Offline Cartesian waypoints + orientation IK, compiled to one collision-checked sequence. Y is world-up. */
+
 public final class TopDownPickPlanner {
     public record TcpWaypoint(Vector3f position, Vector3f direction) {}
     public record Plan(MotionSequence sequence, float rotateTime, float descendTime, float captureTime,

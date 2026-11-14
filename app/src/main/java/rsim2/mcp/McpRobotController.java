@@ -8,7 +8,7 @@ import rsim2.scene.*;
 import org.joml.Vector3f;
 import java.util.*;
 
-/** All methods are called on the simulation thread. Tracks the most recent MCP motion. */
+
 public final class McpRobotController {
     private String taskId;
     private String taskState = "idle";
@@ -124,6 +124,8 @@ public final class McpRobotController {
 
     private boolean taskActive() { return taskState.equals("running") || taskState.equals("paused"); }
 
+    public boolean hasActiveTask() { return taskActive(); }
+
     private JsonObject executeTrajectory(JsonObject args, SceneNode root, List<Joint> joints,
                                          MotionPlayer player, boolean aiBusy, Runnable takeControl) {
         requireIdle(player, aiBusy);
@@ -215,6 +217,7 @@ public final class McpRobotController {
         detail = "";
         taskState = sequence == null ? "completed" : "running";
         if (sequence != null) {
+            sequence.setIncomplete(pick != null || !events.isEmpty());
             player.loadSequence(sequence);
             player.setPlaybackSpeed(1);
             player.play();
@@ -296,7 +299,7 @@ public final class McpRobotController {
         } else if (!player.isPlaying()) finish(player.getCurrentTime() >= player.getDuration() ? "completed" : "interrupted", "");
     }
 
-    /** Never skip the capture event, even with a long render frame. */
+
     public float limitDelta(float delta, MotionPlayer player) {
         if (!taskState.equals("running")) return delta;
         if (advancedTrajectory || pick != null) {
@@ -401,7 +404,19 @@ public final class McpRobotController {
     }
 
     private void finish(String state, String reason) {
-        if (taskActive()) { taskState = state; detail = reason; }
+        if (!taskActive()) return;
+        taskState = state;
+        detail = reason;
+        if (sequence == null || !"completed".equals(state)) return;
+        if (pick != null) {
+            sequence.addEvent(new MotionEvent(pick.captureTime(), pick.object().getId(), pick.tool().getId(), pick.offset()));
+        }
+        for (var event : events) {
+            sequence.addEvent(new MotionEvent(event.time(), event.object().getId(),
+                    event.isRelease() ? null : event.tool().getId(),
+                    event.isRelease() ? new Vector3f() : event.offset()));
+        }
+        sequence.setIncomplete(false);
     }
 
     private JsonObject taskStatus() {

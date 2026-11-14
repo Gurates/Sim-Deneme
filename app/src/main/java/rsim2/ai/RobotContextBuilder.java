@@ -179,7 +179,7 @@ public class RobotContextBuilder {
         sb.append("}\n");
         sb.append("```\n\n");
 
-        sb.append("Always verify joint angular limits before commanding angles, and ensure movements are smooth and physically sound.\n");
+        sb.append("Return one executable JSON command for the entire user request. Put successive joint poses in ordered keyframes of one animation. For a request to approach, grasp and lift, use one grasp_and_lift interaction that includes all three stages. Always verify joint angular limits and ensure movements are smooth.\n");
         sb.append("\n5. OBJECT INTERACTION (send as a standalone command, never combine with pose/actions/animation):\n");
         sb.append("APPROACH WITHOUT GRASP: for 'Simply bring the robotic arm closer to the box, as close as possible', 'move closer', or 'sadece yaklas', emit type=approach. Do not use grasp, attach, or demand a reachable grasp surface for these requests. The local planner may execute a safe partial advance if it cannot reach the surface; it reports measured TCP distance and stops before penetration. It is a sampled direct approach, not a proof of globally closest reach.\n");
         sb.append("```json\n{\"interaction\":{\"type\":\"approach\",\"object\":\"exact_object_id\",\"tool\":\"exact_robot_link_id\"}}\n```\n");

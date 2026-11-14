@@ -6,11 +6,12 @@ import rsim2.collision.AABB;
 import rsim2.collision.EnvironmentMotionGuard;
 import java.util.function.BooleanSupplier;
 import rsim2.motion.MotionPlayer;
+import rsim2.motion.MotionEvent;
 import rsim2.motion.MotionSequence;
 
 import java.util.*;
 
-/** Simulation-only, position-based grasping. No contact forces or gravity are simulated. */
+
 public class ObjectInteractionController {
     public static final float CAPTURE_DISTANCE = 0.03f;
     private final Map<SceneNode, SceneNode> originalParents = new IdentityHashMap<>();
@@ -24,6 +25,8 @@ public class ObjectInteractionController {
     private MotionPlayer approachPlayer;
     private MotionSequence approachSequence;
     private long approachStopGeneration;
+    private long approachSeekGeneration;
+    private boolean completeOnCapture;
     private final EnvironmentMotionGuard motionGuard = new EnvironmentMotionGuard();
     private static final float SURFACE_CLEARANCE = 0.01f;
     private float remainingSeconds;
@@ -145,7 +148,7 @@ public class ObjectInteractionController {
         return "Approaching the surface of " + objectId + " with " + toolId + "; attachment requires a clear approach without object penetration.";
     }
 
-    /** A best verified direct approach: partial progress is valid and never attaches the object. */
+
     public String approach(SceneNode root, List<Joint> joints, String objectId, String toolId, Vector3f toolOffset) {
         SceneNode object = findNode(root, objectId);
         SceneNode tool = findNode(root, toolId);
@@ -174,7 +177,7 @@ public class ObjectInteractionController {
         float[] best = null;
         float bestFraction = 0;
         float bestDistance = initialDistance;
-        // If the surface is unreachable or blocked, try shorter advances instead of rejecting everything.
+
         for (int step = 16; step >= 1; step--) {
             float fraction = step / 16f;
             Vector3f target = new Vector3f(startPoint).lerp(destination, fraction);
@@ -221,7 +224,7 @@ public class ObjectInteractionController {
         return result;
     }
 
-    /** Default to the distal end of a mesh tool, rather than its hinge/pivot. Explicit TCPs win. */
+
     public static Vector3f captureOffset(SceneNode tool, Vector3f requested) {
         if (requested == null || !requested.isFinite()) throw new IllegalArgumentException("Tool offset must be finite.");
         if (requested.lengthSquared() != 0 || tool.getMeshes().isEmpty()) return new Vector3f(requested);
@@ -235,7 +238,7 @@ public class ObjectInteractionController {
         }
         if (farthest.lengthSquared() == 0) return farthest;
         // Keep an actual surface point. Averaging distal vertices can place a TCP
-        // inside the jaw, making a small visual-contact clearance unreachable.
+
         return farthest;
     }
 
@@ -244,7 +247,7 @@ public class ObjectInteractionController {
         List<Vector3f> result = new ArrayList<>(); result.add(tip);
         if (requested.lengthSquared() != 0 || tool.getMeshes().isEmpty()) return result;
         // A distal corner need not lead the jaw for every object face/orientation.
-        // Try real distal surface vertices extremal along each tool-local axis.
+
         for (int axis = 0; axis < 3; axis++) for (int sign : new int[]{-1,1}) {
             Vector3f support = new Vector3f(tip);
             for (var mesh : tool.getMeshes()) {
@@ -264,7 +267,7 @@ public class ObjectInteractionController {
         if (bounds.getHalfExtents().lengthSquared() == 0)
             return toolPoint(tool, offset).distance(bounds.getCenter()) <= CAPTURE_DISTANCE;
         // Clearance targets are planning aids, not evidence of contact. Require the
-        // calibrated/derived TCP AND actual tool geometry near the object at capture.
+
         boolean pointTool = tool.getMeshes().isEmpty() && tool.getCollisionShape() == null;
         float tolerance = captureTolerance(object);
         if (pointTool) return objectDistance(toolPoint(tool, offset), object) <= tolerance;
@@ -339,7 +342,7 @@ public class ObjectInteractionController {
             for (int i = 0; indices != null && i + 2 < indices.length; i += 3) {
                 Vector3f[] triangle = triangle(vertices, indices, i, world);
                 // A point on a real triangle, rather than the empty space in a
-                // whole-tool bounding box (which can include the gripper opening).
+
                 Vector3f nearest = new Vector3f();
                 org.joml.Intersectionf.findClosestPointOnTriangle(triangle[0], triangle[1], triangle[2], objectCenter(object), nearest);
                 if (nearest.isFinite()) distance = Math.min(distance, objectDistance(nearest, object));
@@ -349,7 +352,7 @@ public class ObjectInteractionController {
         if (tool.getCollisionShape() != null) {
             return collisionGeometryDistance(tool.getCollisionShape(), world, object);
         }
-        // Geometry-free tool markers represent an explicitly configured point TCP.
+
         return objectDistance(toolPoint(tool, new Vector3f()), object);
     }
 
@@ -374,7 +377,7 @@ public class ObjectInteractionController {
 
     public boolean isHeld(SceneNode object) { return originalParents.containsKey(object); }
 
-    /** Plans a world-up translation using the held object's center as the IK point. */
+
     public String lift(SceneNode root, List<Joint> joints, String objectId, float height) {
         SceneNode object = findNode(root, objectId);
         if (!isHeld(object)) throw new IllegalArgumentException("Object is not held: " + objectId);
@@ -399,7 +402,7 @@ public class ObjectInteractionController {
         return "Lifting " + objectId + " upward by " + height + " scene units.";
     }
 
-    /** Conservative tool envelope: keeps all tool/finger descendants outside the target. */
+
     private static List<Vector3f> graspTargets(SceneNode object, SceneNode tool, Vector3f offset) {
         AABB bounds = objectBounds(object);
         Vector3f center = bounds.getCenter();
@@ -415,8 +418,8 @@ public class ObjectInteractionController {
             radius = Math.max(radius, corner.distance(tcp));
         }
         List<Vector3f> targets = new ArrayList<>();
-        // Try close surface points too: a sphere around a long tool excludes reachable
-        // grasps unnecessarily. Actual geometry is still checked for every solution.
+
+
         for (float fraction : new float[]{0, 0.25f, 0.5f, 0.625f, 0.75f, 1})
         for (int axis = 0; axis < 3; axis++) for (int sign : new int[]{1, -1}) {
             Vector3f point = new Vector3f(center);
@@ -429,7 +432,7 @@ public class ObjectInteractionController {
             targets.add(point);
         }
         // Face centers can place the wrist inside a wide object. Sample near
-        // face edges too, where the same real fingertip can approach freely.
+
         for (int axis = 0; axis < 3; axis++) for (int sign : new int[]{1,-1})
         for (int tangent = 0; tangent < 3; tangent++) if (tangent != axis)
         for (int side : new int[]{1,-1}) {
@@ -443,7 +446,7 @@ public class ObjectInteractionController {
     }
 
     // Coordinate descent evaluates real FK, including imported origin rotations and joint limits.
-    // Temporary poses are always restored; only a successful solution becomes motor targets.
+
     private float[] solve(List<Joint> chain, SceneNode tool, Vector3f offset, Vector3f target, BooleanSupplier valid) {
         return solve(chain, tool, offset, target, valid, false);
     }
@@ -552,17 +555,18 @@ public class ObjectInteractionController {
             return "Grasp cancelled: stopped or target/tool removed.";
         }
         if (approachPlayer != null) {
-            if (approachPlayer.getSequence() != approachSequence || approachPlayer.getStopGeneration() != approachStopGeneration) {
+            if (approachPlayer.getSequence() != approachSequence || approachPlayer.getStopGeneration() != approachStopGeneration
+                    || approachPlayer.getSeekGeneration() != approachSeekGeneration) {
                 cancelPending();
                 return "Grasp cancelled: another motion replaced the approach.";
             }
-            if (!approachPlayer.isPlaying() && approachPlayer.getCurrentTime() < approachSequence.getDurationSeconds()) return null;
         }
-        remainingSeconds -= Math.max(0, dt);
         if (!objectPoseAtPlan.equals(pendingObject.getWorldTransform(), 0.0001f)) {
             cancelPending();
             return "Grasp cancelled: object moved; request a new approach.";
         }
+        if (approachPlayer != null && approachPlayer.getCurrentTime() < approachSequence.getDurationSeconds()) return null;
+        remainingSeconds = approachPlayer == null ? remainingSeconds - Math.max(0, dt) : 0;
         float tolerance = objectBounds(pendingObject).getHalfExtents().lengthSquared() == 0 ? CAPTURE_DISTANCE : captureTolerance(pendingObject) * .5f;
         if (toolPoint(pendingTool, pendingOffset).distance(pendingTarget) <= tolerance
                 && canCapture(pendingObject, pendingTool, pendingOffset)) {
@@ -578,6 +582,10 @@ public class ObjectInteractionController {
                 return "Grasp cancelled: attachment would distort geometry or create a collision. Use uniform robot scaling.";
             }
             originalParents.put(object, oldParent);
+            if (approachSequence != null) {
+                approachSequence.addEvent(new MotionEvent(approachPlayer.getCurrentTime(), object.getId(), pendingTool.getId(), pendingOffset));
+                if (completeOnCapture) approachSequence.setIncomplete(false);
+            }
             cancelPending();
             return "Grasped " + object.getId() + ". Object now follows the tool (kinematic attachment).";
         }
@@ -603,7 +611,7 @@ public class ObjectInteractionController {
         return "Released " + objectId + " at its current world pose; gravity is not simulated.";
     }
 
-    /** Verified contact event for a preplanned trajectory; never teleports the tool or object. */
+
     public void captureAtContact(SceneNode root, List<Joint> joints, SceneNode object, SceneNode tool, Vector3f offset) {
         if (tool == root || !tool.isRobotPart() || !isAncestor(root, tool) || isAncestor(object, tool)
                 || !objects(root).contains(object) || originalParents.containsKey(object)
@@ -654,11 +662,15 @@ public class ObjectInteractionController {
         clearPending();
     }
 
-    public void bindPlayback(MotionPlayer player, MotionSequence sequence) {
+    public void bindPlayback(MotionPlayer player, MotionSequence sequence, boolean completeOnCapture) {
         approachPlayer = player;
         approachSequence = sequence;
         approachStopGeneration = player.getStopGeneration();
+        approachSeekGeneration = player.getSeekGeneration();
+        this.completeOnCapture = completeOnCapture;
     }
+
+    public boolean hasPendingGrasp() { return pendingObject != null; }
 
     private void clearPending() {
         pendingObject = null;

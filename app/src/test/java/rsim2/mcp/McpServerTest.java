@@ -16,7 +16,7 @@ class McpServerTest {
                 + "{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"tools/list\"}\n"
                 + "{\"jsonrpc\":\"2.0\",\"id\":\"status\",\"method\":\"tools/call\",\"params\":{\"name\":\"get_connection_status\"}}\n"), output);
         String[] lines = output.toString().lines().toArray(String[]::new);
-        assertEquals(3, lines.length); // Notifications must not produce replies.
+        assertEquals(3, lines.length);
         var init = JsonParser.parseString(lines[0]).getAsJsonObject().getAsJsonObject("result");
         assertEquals("2025-06-18", init.get("protocolVersion").getAsString());
         var listed = JsonParser.parseString(lines[1]).getAsJsonObject().getAsJsonObject("result").getAsJsonArray("tools");

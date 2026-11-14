@@ -150,7 +150,7 @@ public class AIPanel {
         this.rootNode = rootNode;
     }
 
-    /** Runs on the simulation thread, even while the chat panel is closed. */
+
     public void update(float deltaTime) {
         Runnable response;
         while ((response = pendingResponses.poll()) != null) {
@@ -184,11 +184,15 @@ public class AIPanel {
         chatHistory.add(new ChatMessage("System", "Motion stopped before collision: " + reason, false));
     }
 
-    public boolean hasActiveInteraction() {
-        return graspLift.isActive();
+    public void reportMotionStatus(String message, boolean error) {
+        chatHistory.add(new ChatMessage("System", message, error));
     }
 
-    /** External commands invalidate asynchronous AI replies and pending interaction plans. */
+    public boolean hasActiveInteraction() {
+        return graspLift.isActive() || interactions.hasPendingGrasp();
+    }
+
+
     public void onExternalControl() {
         requestGeneration++;
         pendingResponses.clear();
@@ -290,6 +294,8 @@ public class AIPanel {
                         ImGui.sameLine();
                         renderSafeWrappedText(msg.text);
                     } else if ("System".equals(msg.sender)) {
+                        if (msg.isError) renderSafeColoredWrappedText(1.0f, 0.4f, 0.4f, 1.0f, msg.text);
+                        else renderSafeWrappedText(msg.text);
                     } else {
                         if (msg.isError) {
                             ImGui.textColored(1.0f, 0.35f, 0.35f, 1.0f, "[Error]");
@@ -433,11 +439,13 @@ public class AIPanel {
         chatHistory.add(new ChatMessage("User", userPrompt, false));
         String control = userPrompt.trim().toLowerCase(java.util.Locale.forLanguageTag("tr-TR"));
         if (java.util.Set.of("başla", "başlat", "devam", "devam et", "play", "start").contains(control)) {
-            if (motionPlayer.hasSequence()) {
-                motionPlayer.play();
+            try {
+                if (!motionPlayer.hasSequence()) throw new IllegalArgumentException("No motion is loaded.");
+                if (engine == null) motionPlayer.play();
+                else engine.playMotion();
                 chatHistory.add(new ChatMessage("System", "Playing: " + motionPlayer.getSequence().getName(), false));
-            } else {
-                chatHistory.add(new ChatMessage("System", "No motion is loaded. The last grasp may have been rejected; Play cannot start a rejected plan. Request a joint movement or a new grasp first.", false));
+            } catch (IllegalArgumentException error) {
+                reportMotionStatus(error.getMessage(), true);
             }
             return;
         }
@@ -487,6 +495,7 @@ public class AIPanel {
                             requestResponse(userPrompt + "\n\nThe previous reply did not supply an executable command. "
                                     + "For the original requested motion, return exactly one JSON action using the action protocol and current scene IDs. "
                                     + "For grasp and lift/pick up use interaction.type=grasp_and_lift; the simulator sequences capture then lift. For grasp only use interaction.type=grasp. "
+                                    + "For successive joint motions, put the full order in the keyframes of a single animation. "
                                     + "For closer/approach-only requests use interaction.type=approach, never grasp. A safe partial advance is supported. "
                                     + "Do not claim movement has started. If the target/tool is ambiguous or the request is informational, explain or ask for clarification instead of guessing.", true);
                             return;

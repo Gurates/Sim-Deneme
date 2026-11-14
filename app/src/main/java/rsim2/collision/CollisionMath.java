@@ -57,7 +57,7 @@ public class CollisionMath {
         return intersectGJK(shapeA, transformA, shapeB, transformB, margin, false);
     }
 
-    /** A guard accepts separation only when GJK proves it; exhaustion is blocked. */
+
     public static boolean intersectGJKConservative(CollisionShape a, Matrix4f ta, CollisionShape b, Matrix4f tb) {
         return intersectGJK(a, ta, b, tb, 0, true);
     }

@@ -3,7 +3,7 @@ package rsim2.motion;
 import rsim2.scene.Joint;
 import java.util.List;
 
-/** Builds replayable motion from the same motor targets used by direct AI commands. */
+
 public final class JointMotion {
     private JointMotion() {}
 
@@ -25,7 +25,7 @@ public final class JointMotion {
         }
         if (!changed) return null;
         MotionSequence seq = new MotionSequence(name, duration, false);
-        // Smoothstep timing, sampled into ordinary replayable keyframes.
+
         for (int frame = 0; frame <= 30; frame++) {
             float t = frame / 30f;
             float blend = t * t * (3 - 2 * t);
@@ -38,5 +38,17 @@ public final class JointMotion {
             seq.addKeyframe(key);
         }
         return seq;
+    }
+
+    public static MotionSequence forInteraction(String name, List<Joint> joints, float[] start) {
+        MotionSequence motion = fromTargets(name, joints, start);
+        if (motion != null) return motion;
+        motion = new MotionSequence(name, 0.01f, false);
+        Keyframe frame = new Keyframe(0);
+        for (int i = 0; i < joints.size(); i++) {
+            frame.addJointAngle(joints.get(i).getId(), (float) Math.toDegrees(start[i]));
+        }
+        motion.addKeyframe(frame);
+        return motion;
     }
 }

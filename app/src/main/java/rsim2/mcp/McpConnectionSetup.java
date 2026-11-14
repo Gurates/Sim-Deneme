@@ -13,7 +13,7 @@ import java.util.List;
 import java.util.concurrent.TimeUnit;
 import java.time.Duration;
 
-/** Builds shell-free launch settings from the running application. */
+
 public record McpConnectionSetup(String command, List<String> arguments) {
     public McpConnectionSetup {
         arguments = List.copyOf(arguments);
@@ -51,7 +51,7 @@ public record McpConnectionSetup(String command, List<String> arguments) {
     }
 
     public String codexConfig() {
-        // JSON strings/arrays are valid TOML basic strings/arrays for these paths.
+
         Gson gson = new GsonBuilder().disableHtmlEscaping().create();
         return "[mcp_servers.rsim2]\ncommand = " + gson.toJson(command)
                 + "\nargs = " + gson.toJson(arguments) + "\n";

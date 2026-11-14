@@ -38,7 +38,7 @@ class MotionCollisionStateTest {
     @Test void seekBetweenFramesIsCheckedAgainstLastAcceptedPose() {
         state.beginStep(root, List.of(joint));
         assertNull(state.validateAndCommit(root, List.of(joint)));
-        joint.setAngle((float) Math.PI / 2); // UI seek after the frame guard.
+        joint.setAngle((float) Math.PI / 2);
         joint.getMotor().setTargetAngleRadians(joint.getCurrentAngleRadians());
         joint.getMotor().setCurrentVelocity(1);
         state.beginStep(root, List.of(joint));

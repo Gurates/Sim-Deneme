@@ -111,7 +111,7 @@ public class Mesh {
         return createTransformed(original, new Matrix4f().scaling(scale));
     }
 
-    /** Bakes a visual-local transform without changing the owning link/joint frame. */
+
     public static Mesh createTransformed(Mesh original, Matrix4f transform) {
         if (original == null) return null;
         float[] origVerts = original.getVertices();

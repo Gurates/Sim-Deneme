@@ -24,6 +24,7 @@ import rsim2.input.Input;
 import rsim2.io.RobotJsonIO;
 import rsim2.io.UrdfLoader;
 import rsim2.motion.MotionPlayer;
+import rsim2.motion.MotionSequence;
 import rsim2.scene.Joint;
 import rsim2.scene.SceneNode;
 import rsim2.ui.*;
@@ -267,6 +268,7 @@ public class Engine {
             }
             if (motionPlayer != null) {
                 motionPlayer.stop();
+                motionPlayer.loadSequence(null);
             }
             if (aiPanel != null) {
                 aiPanel.setRootNode(this.rootNode);
@@ -341,6 +343,7 @@ public class Engine {
             }
             if (motionPlayer != null) {
                 motionPlayer.stop();
+                motionPlayer.loadSequence(null);
             }
             if (aiPanel != null) {
                 aiPanel.setRootNode(this.rootNode);
@@ -383,6 +386,30 @@ public class Engine {
 
     public MotionPlayer getMotionPlayer() {
         return motionPlayer;
+    }
+
+    public boolean hasActiveMotionTask() {
+        return mcpRobot.hasActiveTask() || (aiPanel != null && aiPanel.hasActiveInteraction());
+    }
+
+    public boolean canPlayMotion() {
+        return motionPlayer != null && motionPlayer.hasSequence() && !mcpRobot.hasActiveTask()
+                && (!motionPlayer.getSequence().isIncomplete() || aiPanel != null && aiPanel.hasActiveInteraction());
+    }
+
+    public void playMotion() {
+        if (!canPlayMotion()) throw new IllegalArgumentException("No playable motion is ready.");
+        MotionSequence sequence = motionPlayer.getSequence();
+        if (!sequence.getEvents().isEmpty() && !sequence.isIncomplete()) {
+            if (!canReplayInteractions()) throw new IllegalArgumentException("Clear E-stop and disable Sim2Real sync before replaying interactions.");
+            if (motionPlayer.startsNewPlayback()) sequence.validateReplay(rootNode, aiPanel.getObjectInteractions());
+        }
+        motionPlayer.play();
+    }
+
+    private boolean canReplayInteractions() {
+        var bridge = rsim2.bridge.BridgeManager.getInstance();
+        return !bridge.getSafetyFilter().isEmergencyStopActive() && !bridge.isLiveSyncEnabled() && !bridge.isDigitalTwinEnabled();
     }
 
     public BridgePanel getBridgePanel() {
@@ -490,13 +517,14 @@ public class Engine {
             mcpBridge.drain(request -> mcpRobot.execute(request.get("tool").getAsString(),
                     request.getAsJsonObject("arguments"), rootNode, joints, motionPlayer,
                     collisionWorld == null ? null : collisionWorld.getLastResult(),
-                    aiPanel != null && aiPanel.hasActiveInteraction(),
+                    motionPlayer.isReplayingEvents() || (aiPanel != null && aiPanel.hasActiveInteraction()),
                     () -> {
                         rsim2.mcp.McpBridge.ensureRequestActive();
                         if (aiPanel != null) aiPanel.onExternalControl();
                     }));
 
-            if (motionPlayer != null && motionPlayer.isPlaying()) {
+            if (motionPlayer.isReplayingEvents() && !canReplayInteractions()) motionPlayer.cancelReplay();
+            if (motionPlayer.isPlaying()) {
                 motionPlayer.update(mcpRobot.limitDelta(deltaTime, motionPlayer), joints);
             } else if (joints != null) {
                 for (Joint joint : joints) {
@@ -508,8 +536,16 @@ public class Engine {
 
             String blocked = motionCollisionState.validateAndCommit(rootNode, joints);
             if (blocked != null) {
-                if (motionPlayer != null) motionPlayer.pause();
+                motionPlayer.pause();
+                motionPlayer.cancelReplay();
                 if (aiPanel != null) aiPanel.onMotionBlocked(blocked);
+            } else if (aiPanel != null && motionPlayer.isReplayingEvents()) {
+                try {
+                    motionPlayer.applyReplayEvents(rootNode, joints, aiPanel.getObjectInteractions());
+                } catch (IllegalArgumentException error) {
+                    motionPlayer.cancelReplay();
+                    aiPanel.reportMotionStatus("Playback stopped: " + error.getMessage(), true);
+                }
             }
             // Only publish poses after validation. Rejected steps never reach hardware or rendering.
             mcpRobot.afterStep(rootNode, joints, motionPlayer, blocked);

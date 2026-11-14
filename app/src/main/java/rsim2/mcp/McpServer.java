@@ -5,7 +5,7 @@ import java.io.*;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
 
-/** Stdio MCP adapter forwarding tools to the running simulator's loopback bridge. */
+
 public final class McpServer {
     public static final String PROTOCOL_VERSION = "2025-11-25";
     private static final String SERVER_VERSION = "1.0.0";

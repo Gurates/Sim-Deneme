@@ -52,7 +52,7 @@ class EnvironmentMotionGuardTest {
     @Test void clearMotionAndTouchingSurfacesAreAccepted() {
         SceneNode box = obstacle("box", 1.12f, 1, 0.1f);
         assertNull(guard.collisionAtPose(root, List.of(joint)), "Surface contact is allowed");
-        box.getLocalPosition().x += 0.05f; // Room for the tool's corners as it rotates.
+        box.getLocalPosition().x += 0.05f;
         assertNull(guard.validateStep(root, List.of(joint), new float[]{0}, new float[]{0.5f}));
     }
 

@@ -283,8 +283,8 @@ public class RobotJsonIO {
                 }
 
                 JointType type = JointType.fromString(jDto.type);
-                Vector3f axis = (jDto.axis != null && jDto.axis.length >= 3) 
-                        ? new Vector3f(jDto.axis[0], jDto.axis[1], jDto.axis[2]) 
+                Vector3f axis = (jDto.axis != null && jDto.axis.length >= 3)
+                        ? new Vector3f(jDto.axis[0], jDto.axis[1], jDto.axis[2])
                         : new Vector3f(0, 1, 0);
 
                 Joint joint = new Joint(jDto.id, parentNode, childNode, type, axis);
@@ -310,7 +310,7 @@ public class RobotJsonIO {
         }
 
         // A saved editor "world" has no joint to the robot base. Returning an arbitrary
-        // HashMap root can otherwise leave the entire articulated robot disconnected.
+
         List<SceneNode> roots = new ArrayList<>();
         for (LinkDTO link : def.links) {
             SceneNode node = result.nodesById.get(link.id);

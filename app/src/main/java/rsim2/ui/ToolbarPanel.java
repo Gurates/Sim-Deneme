@@ -11,6 +11,8 @@ import imgui.type.ImInt;
 import org.lwjgl.PointerBuffer;
 import org.lwjgl.system.MemoryStack;
 import org.lwjgl.util.tinyfd.TinyFileDialogs;
+import java.nio.file.Path;
+import java.util.Locale;
 import rsim2.core.Engine;
 import rsim2.editor.EnvironmentModelImporter;
 import rsim2.editor.ModelImporter;
@@ -18,6 +20,7 @@ import rsim2.editor.SelectionManager;
 import rsim2.editor.UpAxis;
 import rsim2.editor.commands.CommandHistory;
 import rsim2.editor.commands.ImportModelCommand;
+import rsim2.io.MotionSequenceIO;
 import rsim2.motion.MotionPlayer;
 import rsim2.motion.MotionSequence;
 import rsim2.scene.SceneNode;
@@ -36,6 +39,7 @@ public class ToolbarPanel {
     private BridgePanel bridgePanel;
     private CollisionPanel collisionPanel;
     private final McpPanel mcpPanel;
+    private String motionStatus = "";
 
     public ToolbarPanel(Engine engine, SceneNode rootNode, SelectionManager selectionManager,
             CommandHistory commandHistory, AIPanel aiPanel) {
@@ -69,6 +73,7 @@ public class ToolbarPanel {
 
     public void setRootNode(SceneNode rootNode) {
         this.rootNode = rootNode;
+        motionStatus = "";
     }
 
     public void setCommandHistory(CommandHistory commandHistory) {
@@ -174,10 +179,14 @@ public class ToolbarPanel {
                 ImGui.pushStyleColor(ImGuiCol.Button, 0.18f, 0.68f, 0.35f, 1.0f);
                 ImGui.pushStyleColor(ImGuiCol.ButtonHovered, 0.22f, 0.78f, 0.42f, 1.0f);
             }
-            ImGui.beginDisabled(!hasSequence);
+            ImGui.beginDisabled(!engine.canPlayMotion());
             if (ImGui.button("> Play", 68.0f, 24.0f)) {
-                if (motionPlayer != null) {
-                    motionPlayer.play();
+                try {
+                    engine.playMotion();
+                    motionStatus = "";
+                } catch (IllegalArgumentException error) {
+                    motionStatus = error.getMessage();
+                    ImGui.openPopup("Motion files");
                 }
             }
             ImGui.endDisabled();
@@ -203,16 +212,18 @@ public class ToolbarPanel {
         ImGui.sameLine();
         boolean loopVal = (motionPlayer != null && motionPlayer.isLooping());
         ImBoolean loopBool = new ImBoolean(loopVal);
+        boolean interactionMotion = hasSequence && (motionPlayer.getSequence().isIncomplete()
+                || !motionPlayer.getSequence().getEvents().isEmpty());
+        ImGui.beginDisabled(interactionMotion || engine.hasActiveMotionTask());
         if (ImGui.checkbox("Loop", loopBool)) {
             if (motionPlayer != null) {
                 motionPlayer.setLooping(loopBool.get());
             }
         }
+        ImGui.endDisabled();
 
         ImGui.sameLine(displayWidth - 560.0f);
-        if(ImGui.button("Scene Object", 100.0f,24.0f)){
-
-        }
+        renderMotionFiles(motionPlayer);
 
 
         if (hasSequence && motionPlayer.getSequence() != null) {
@@ -223,9 +234,11 @@ public class ToolbarPanel {
             ImFloat timeVal = new ImFloat(curTime);
 
             ImGui.setNextItemWidth(90.0f);
+            ImGui.beginDisabled(interactionMotion || engine.hasActiveMotionTask());
             if (ImGui.sliderFloat("##topTimeline", timeVal.getData(), 0.0f, duration, "%.1fs", ImGuiSliderFlags.None)) {
                 motionPlayer.seek(timeVal.get(), engine.getJoints());
             }
+            ImGui.endDisabled();
             if (ImGui.isItemHovered()) {
                 ImGui.setTooltip(String.format("Motion: %s (%.2fs / %.2fs)", seq.getName(), curTime, duration));
             }
@@ -314,6 +327,52 @@ public class ToolbarPanel {
 
         ImGui.end();
         mcpPanel.render();
+    }
+
+    private void renderMotionFiles(MotionPlayer player) {
+        if (ImGui.button("Motion", 72.0f, 24.0f)) ImGui.openPopup("Motion files");
+        if (!ImGui.beginPopup("Motion files")) return;
+        MotionSequence sequence = player.getSequence();
+        if (sequence != null) {
+            ImGui.textUnformatted(String.format("%s (%.2fs)", sequence.getName(), sequence.getDurationSeconds()));
+            if (sequence.isIncomplete()) ImGui.textDisabled("Only completed interactions can be saved.");
+        }
+
+        ImGui.beginDisabled(sequence == null || !sequence.hasKeyframes() || sequence.isIncomplete() || engine.hasActiveMotionTask());
+        if (ImGui.button("Save Motion")) chooseMotionFile(player, true);
+        ImGui.endDisabled();
+
+        ImGui.sameLine();
+        ImGui.beginDisabled(player.isPlaying() || engine.hasActiveMotionTask() || player.isReplayingEvents());
+        if (ImGui.button("Load Motion")) chooseMotionFile(player, false);
+        ImGui.endDisabled();
+        if (!motionStatus.isEmpty()) ImGui.textWrapped(motionStatus);
+        ImGui.endPopup();
+    }
+
+    private void chooseMotionFile(MotionPlayer player, boolean save) {
+        try (MemoryStack stack = stackPush()) {
+            PointerBuffer filters = stack.mallocPointer(1);
+            filters.put(stack.UTF8("*.motion.json")).flip();
+            String description = "Motion Files (*.motion.json)";
+            String path = save
+                    ? TinyFileDialogs.tinyfd_saveFileDialog("Save Motion", "robot.motion.json", filters, description)
+                    : TinyFileDialogs.tinyfd_openFileDialog("Load Motion", "", filters, description, false);
+            if (path == null || path.isBlank()) return;
+            if (save) {
+                if (!path.toLowerCase(Locale.ROOT).endsWith(".motion.json")) path += ".motion.json";
+                MotionSequenceIO.save(player.getSequence(), Path.of(path));
+                motionStatus = "Saved " + Path.of(path).getFileName();
+            } else {
+                MotionSequence sequence = MotionSequenceIO.load(Path.of(path));
+                player.stop();
+                if (aiPanel != null) aiPanel.onExternalControl();
+                player.loadSequence(sequence);
+                motionStatus = "Loaded " + sequence.getName();
+            }
+        } catch (Exception error) {
+            motionStatus = "Motion file could not be " + (save ? "saved: " : "loaded: ") + error.getMessage();
+        }
     }
 
     private void saveProjectAs() {

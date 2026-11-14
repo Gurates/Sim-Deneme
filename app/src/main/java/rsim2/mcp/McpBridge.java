@@ -11,7 +11,7 @@ import java.util.UUID;
 import java.util.concurrent.*;
 import java.util.function.Function;
 
-/** Authenticated loopback IPC. Simulator objects are accessed only by drain() on its main thread. */
+
 public final class McpBridge implements AutoCloseable {
     private record Request(JsonObject payload, CompletableFuture<JsonObject> reply, long deadline) {}
     private static final ThreadLocal<Long> requestDeadline = new ThreadLocal<>();
@@ -89,7 +89,7 @@ public final class McpBridge implements AutoCloseable {
                 }
                 socket.getOutputStream().write((response + "\n").getBytes(StandardCharsets.UTF_8));
             } catch (Exception e) {
-                // Invalid/disconnected local clients must not terminate the bridge.
+
             }
         }
     }

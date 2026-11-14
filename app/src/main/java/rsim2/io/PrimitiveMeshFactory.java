@@ -2,7 +2,7 @@ package rsim2.io;
 
 import rsim2.graphics.Mesh;
 
-/** Centered primitive visuals in the source model's coordinates (Z-axis cylinders). */
+
 public final class PrimitiveMeshFactory {
     private static final int CYLINDER_SEGMENTS = 32;
 
