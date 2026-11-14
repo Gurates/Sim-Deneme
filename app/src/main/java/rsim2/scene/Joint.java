@@ -99,6 +99,10 @@ public class Joint {
         return axis;
     }
 
+    public Quaternionf getOriginRotation() {
+        return new Quaternionf(originRotation);
+    }
+
     public float getCurrentAngleRadians() {
         return currentAngleRadians;
     }

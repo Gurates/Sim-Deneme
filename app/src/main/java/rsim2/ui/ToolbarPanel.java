@@ -35,6 +35,7 @@ public class ToolbarPanel {
     private final AIPanel aiPanel;
     private BridgePanel bridgePanel;
     private CollisionPanel collisionPanel;
+    private final McpPanel mcpPanel;
 
     public ToolbarPanel(Engine engine, SceneNode rootNode, SelectionManager selectionManager,
             CommandHistory commandHistory, AIPanel aiPanel) {
@@ -49,6 +50,7 @@ public class ToolbarPanel {
     public ToolbarPanel(Engine engine, SceneNode rootNode, SelectionManager selectionManager,
             CommandHistory commandHistory, AIPanel aiPanel, BridgePanel bridgePanel, CollisionPanel collisionPanel) {
         this.engine = engine;
+        this.mcpPanel = new McpPanel(engine.getMcpBridge());
         this.rootNode = rootNode;
         this.selectionManager = selectionManager;
         this.commandHistory = commandHistory;
@@ -207,6 +209,12 @@ public class ToolbarPanel {
             }
         }
 
+        ImGui.sameLine(displayWidth - 560.0f);
+        if(ImGui.button("Scene Object", 100.0f,24.0f)){
+
+        }
+
+
         if (hasSequence && motionPlayer.getSequence() != null) {
             MotionSequence seq = motionPlayer.getSequence();
             ImGui.sameLine();
@@ -223,11 +231,14 @@ public class ToolbarPanel {
             }
         }
 
+
         ImGui.sameLine(displayWidth - 450.0f);
 
-
-        if(ImGui.button("Scene Object", 100,24.0f)){
-            
+        if (ImGui.button("MCP", 100.0f, 24.0f)) {
+            mcpPanel.toggleVisible();
+        }
+        if (ImGui.isItemHovered()) {
+            ImGui.setTooltip("MCP connection setup and server test");
         }
 
         ImGui.sameLine(displayWidth - 335.0f);
@@ -302,6 +313,7 @@ public class ToolbarPanel {
         }
 
         ImGui.end();
+        mcpPanel.render();
     }
 
     private void saveProjectAs() {

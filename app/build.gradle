@@ -67,6 +67,24 @@ application {
     mainClass = 'rsim2.App'
 }
 
+// Separate launcher keeps GUI/native initialization and logs off MCP stdout.
+tasks.register('mcpStartScripts', CreateStartScripts) {
+    applicationName = 'rsim2-mcp'
+    mainClass = 'rsim2.mcp.McpServer'
+    classpath = tasks.named('startScripts').get().classpath
+    outputDir = layout.buildDirectory.dir('mcpScripts').get().asFile
+}
+
+distributions {
+    main {
+        contents {
+            from(tasks.named('mcpStartScripts')) {
+                into 'bin'
+            }
+        }
+    }
+}
+
 tasks.named('run') {
     workingDir = rootProject.projectDir
 }

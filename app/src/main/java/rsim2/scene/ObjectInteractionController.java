@@ -603,6 +603,23 @@ public class ObjectInteractionController {
         return "Released " + objectId + " at its current world pose; gravity is not simulated.";
     }
 
+    /** Verified contact event for a preplanned trajectory; never teleports the tool or object. */
+    public void captureAtContact(SceneNode root, List<Joint> joints, SceneNode object, SceneNode tool, Vector3f offset) {
+        if (tool == root || !tool.isRobotPart() || !isAncestor(root, tool) || isAncestor(object, tool)
+                || !objects(root).contains(object) || originalParents.containsKey(object)
+                || tool.getChildren().stream().anyMatch(child -> !child.isRobotPart())
+                || originalParents.keySet().stream().anyMatch(n -> n.getParent() == tool)
+                || !canCapture(object, tool, offset) || motionGuard.collisionAtPose(root, joints) != null)
+            throw new IllegalArgumentException("Capture failed: verified collision-free tool contact is required.");
+        for (SceneNode parent = object.getParent(); parent != null && parent != root; parent = parent.getParent()) {
+            if (parent.isRobotPart()) throw new IllegalArgumentException("Object is already attached to the robot.");
+        }
+        SceneNode parent = object.getParent();
+        if (!reparentChecked(object, tool, () -> motionGuard.collisionAtPose(root, joints) == null))
+            throw new IllegalArgumentException("Capture would distort geometry or cause collision.");
+        originalParents.put(object, parent);
+    }
+
     private static boolean reparentChecked(SceneNode object, SceneNode parent, BooleanSupplier valid) {
         SceneNode originalParent = object.getParent();
         int index = originalParent == null ? -1 : originalParent.indexOfChild(object);

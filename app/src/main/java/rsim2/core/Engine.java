@@ -81,6 +81,10 @@ public class Engine {
     private CollisionPanel collisionPanel;
     private CollisionWorld collisionWorld;
     private MotionPlayer motionPlayer;
+    private final rsim2.mcp.McpBridge mcpBridge = new rsim2.mcp.McpBridge();
+    private final rsim2.mcp.McpRobotController mcpRobot = new rsim2.mcp.McpRobotController();
+
+    public rsim2.mcp.McpBridge getMcpBridge() { return mcpBridge; }
     private final rsim2.collision.MotionCollisionState motionCollisionState = new rsim2.collision.MotionCollisionState();
 
     private SceneNode rootNode;
@@ -477,10 +481,23 @@ public class Engine {
             glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
             motionCollisionState.beginStep(rootNode, joints);
-            if (aiPanel != null) aiPanel.update(deltaTime);
+            if (aiPanel != null) {
+                aiPanel.update(deltaTime);
+                mcpRobot.useInteractions(rootNode, aiPanel.getObjectInteractions());
+            }
+            if (!mcpBridge.isEnabled()) mcpRobot.disable(motionPlayer, joints);
+            mcpRobot.afterStep(rootNode, joints, motionPlayer, null);
+            mcpBridge.drain(request -> mcpRobot.execute(request.get("tool").getAsString(),
+                    request.getAsJsonObject("arguments"), rootNode, joints, motionPlayer,
+                    collisionWorld == null ? null : collisionWorld.getLastResult(),
+                    aiPanel != null && aiPanel.hasActiveInteraction(),
+                    () -> {
+                        rsim2.mcp.McpBridge.ensureRequestActive();
+                        if (aiPanel != null) aiPanel.onExternalControl();
+                    }));
 
             if (motionPlayer != null && motionPlayer.isPlaying()) {
-                motionPlayer.update(deltaTime, joints);
+                motionPlayer.update(mcpRobot.limitDelta(deltaTime, motionPlayer), joints);
             } else if (joints != null) {
                 for (Joint joint : joints) {
                     if (joint != null && joint.getMotor() != null) {
@@ -495,6 +512,7 @@ public class Engine {
                 if (aiPanel != null) aiPanel.onMotionBlocked(blocked);
             }
             // Only publish poses after validation. Rejected steps never reach hardware or rendering.
+            mcpRobot.afterStep(rootNode, joints, motionPlayer, blocked);
             rsim2.bridge.BridgeManager.getInstance().streamCurrentJointStates(joints,
                     motionPlayer != null ? motionPlayer.getCurrentTime() : 0.0f);
 
@@ -660,6 +678,7 @@ public class Engine {
     }
 
     private void cleanup() {
+        mcpBridge.close();
         imguiLayer.dispose();
 
         glfwFreeCallbacks(window);

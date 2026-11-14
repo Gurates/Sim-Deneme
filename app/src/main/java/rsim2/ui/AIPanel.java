@@ -41,6 +41,8 @@ public class AIPanel {
     private MotionPlayer motionPlayer;
     private CollisionWorld collisionWorld;
     private ObjectInteractionController interactions = new ObjectInteractionController();
+
+    public ObjectInteractionController getObjectInteractions() { return interactions; }
     private final GraspLiftCoordinator graspLift = new GraspLiftCoordinator();
     private long requestGeneration;
     private final ConcurrentLinkedQueue<Runnable> pendingResponses = new ConcurrentLinkedQueue<>();
@@ -180,6 +182,19 @@ public class AIPanel {
         graspLift.cancel("motion blocked: " + reason);
         interactions.cancelPending();
         chatHistory.add(new ChatMessage("System", "Motion stopped before collision: " + reason, false));
+    }
+
+    public boolean hasActiveInteraction() {
+        return graspLift.isActive();
+    }
+
+    /** External commands invalidate asynchronous AI replies and pending interaction plans. */
+    public void onExternalControl() {
+        requestGeneration++;
+        pendingResponses.clear();
+        isLoading = false;
+        interactions.cancelPending();
+        graspLift.cancel("external MCP control");
     }
 
     private void reportAiError(String operation, RuntimeException error) {

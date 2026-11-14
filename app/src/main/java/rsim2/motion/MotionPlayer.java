@@ -14,6 +14,7 @@ public class MotionPlayer {
     private boolean isPlaying = false;
     private boolean isLooping = false;
     private long stopGeneration;
+    private long seekGeneration;
     private List<Joint> controlledJoints = List.of();
 
     private final Map<String, Float> sampledAngles = new HashMap<>();
@@ -72,10 +73,12 @@ public class MotionPlayer {
     }
 
     public long getStopGeneration() { return stopGeneration; }
+    public long getSeekGeneration() { return seekGeneration; }
 
     public void seek(float timeSeconds, List<Joint> joints) {
         bindJoints(joints);
         if (!hasSequence()) return;
+        seekGeneration++;
         this.currentTime = Math.max(0.0f, Math.min(sequence.getDurationSeconds(), timeSeconds));
         applyCurrentFrame(joints);
     }
