@@ -80,21 +80,17 @@ public final class McpRobotController {
             case "move_tcp" -> moveTcp(args, root, joints, player, aiBusy, takeControl);
             case "pick_object_top_down" -> pick(args, root, joints, player, aiBusy, takeControl);
             case "pause_motion" -> {
-                if (!taskState.equals("running") || player.getSequence() != sequence)
+                if (!currentTask(root, joints, player) || !taskState.equals("running"))
                     throw new IllegalArgumentException("No running MCP task.");
                 takeControl.run();
-                player.bindJoints(joints);
-                player.pause();
-                taskState = "paused";
+                pauseTask(player, joints);
                 yield taskStatus();
             }
             case "resume_motion" -> {
-                if (!canMove() || aiBusy || !taskState.equals("paused") || !currentTask(root, joints, player)
-                        || player.isPlaying() || player.isLooping())
+                if (aiBusy || !canResumeTask(root, joints, player))
                     throw new IllegalArgumentException("No resumable MCP task in the current scene.");
                 takeControl.run();
-                player.play();
-                taskState = "running";
+                resumeTask(root, joints, player);
                 yield taskStatus();
             }
             case "capture_object" -> {
@@ -125,6 +121,32 @@ public final class McpRobotController {
     private boolean taskActive() { return taskState.equals("running") || taskState.equals("paused"); }
 
     public boolean hasActiveTask() { return taskActive(); }
+
+    public boolean pauseTask(MotionPlayer player, List<Joint> joints) {
+        if (!taskState.equals("running") || player.getSequence() != sequence || !player.isPlaying()) return false;
+        player.bindJoints(joints);
+        player.pause();
+        taskState = "paused";
+        return true;
+    }
+
+    public boolean canResumeTask(SceneNode root, List<Joint> joints, MotionPlayer player) {
+        return taskState.equals("paused") && currentTask(root, joints, player) && canMove()
+                && !player.isPlaying() && !player.isLooping();
+    }
+
+    public void resumeTask(SceneNode root, List<Joint> joints, MotionPlayer player) {
+        if (!canResumeTask(root, joints, player))
+            throw new IllegalArgumentException("No resumable MCP task in the current scene.");
+        player.play();
+        taskState = "running";
+    }
+
+    public String incompleteMotionReason(MotionPlayer player) {
+        if (player.getSequence() != sequence || sequence == null || !sequence.isIncomplete()
+                || taskActive() || detail.isBlank()) return "";
+        return detail;
+    }
 
     private JsonObject executeTrajectory(JsonObject args, SceneNode root, List<Joint> joints,
                                          MotionPlayer player, boolean aiBusy, Runnable takeControl) {

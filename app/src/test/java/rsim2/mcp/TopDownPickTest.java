@@ -72,6 +72,71 @@ class TopDownPickTest {
         assertFalse(player.isPlaying());
     }
 
+    @Test void pausingAndResumingAnIncompletePickPreservesTheCaptureEvent() {
+        String taskId = call("pick_object_top_down", arguments).get("task_id").getAsString();
+        player.update(robot.limitDelta(.01f, player), joints);
+        assertTrue(robot.pauseTask(player, joints));
+        robot.afterStep(root, joints, player, null);
+        assertEquals("paused", call("get_task_status", "{}").get("state").getAsString());
+        assertSame(root, box.getParent());
+        assertTrue(robot.canResumeTask(root, joints, player));
+        robot.resumeTask(root, joints, player);
+        int frameCount = player.getSequence().getKeyframes().size();
+        for (int frame = 0; frame <= frameCount && player.isPlaying(); frame++) {
+            player.update(robot.limitDelta(100, player), joints);
+            robot.afterStep(root, joints, player, null);
+        }
+        JsonObject completed = call("get_task_status", "{}");
+        assertEquals(taskId, completed.get("task_id").getAsString());
+        assertEquals("completed", completed.get("state").getAsString());
+        assertSame(tool, box.getParent());
+    }
+
+    @Test void blockedPickCannotResumeAndReportsItsCollision() {
+        call("pick_object_top_down", arguments);
+        player.pause();
+        robot.afterStep(root, joints, player, "gripper intersects box.");
+        assertTrue(player.getSequence().isIncomplete());
+        assertFalse(robot.canResumeTask(root, joints, player));
+        assertEquals("gripper intersects box.", robot.incompleteMotionReason(player));
+    }
+
+    @Test void blockedInteractionCanReplayItsJointPathWithoutReplayingEvents() {
+        box.getLocalPosition().set(2.3f, 1, 0);
+        box.setCollisionShape(null);
+        call("execute_trajectory", """
+                {"waypoints":[
+                  {"targets_degrees":{"a":10},"event":{"type":"capture","object":"box","tool":"tool","tool_offset":[0,0,0]}},
+                  {"targets_degrees":{"a":-10}}
+                ]}
+                """);
+        MotionSequence sequence = player.getSequence();
+        // Incomplete recordings may already contain recorded events from an earlier phase.
+        sequence.addEvent(new MotionEvent(0, "box", "tool", new Vector3f()));
+        player.update(robot.limitDelta(.01f, player), joints);
+        player.pause();
+        robot.afterStep(root, joints, player, "gripper intersects box.");
+        assertTrue(player.getCurrentTime() > 0);
+
+        player.playIncompletePreview();
+        assertEquals(0, player.getCurrentTime());
+        assertTrue(player.isPlaying());
+        assertFalse(player.isReplayingEvents());
+        player.update(100, joints); // First frame is applied without skipping to the final pose.
+        player.applyReplayEvents(root, joints, new ObjectInteractionController());
+        assertSame(root, box.getParent());
+        player.update(100, joints);
+        assertEquals(10, Math.toDegrees(joints.getFirst().getCurrentAngleRadians()), .001);
+        player.pause();
+        float pausedAt = player.getCurrentTime();
+        player.playIncompletePreview();
+        assertEquals(pausedAt, player.getCurrentTime());
+        player.update(100, joints);
+        assertEquals(-10, Math.toDegrees(joints.getFirst().getCurrentAngleRadians()), .001);
+        assertFalse(player.isPlaying());
+        assertTrue(sequence.isIncomplete());
+    }
+
     @Test void actualToolBodyRemainsClearDuringDensePlayback() {
         tool.setCollisionShape(new BoxShape(-.01f,-.01f,-.01f,.01f,.01f,.01f));
         arguments=arguments.replace("[0,0,0]", "[0.011,0,0]");

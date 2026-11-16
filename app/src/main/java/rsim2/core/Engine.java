@@ -1,6 +1,7 @@
 package rsim2.core;
 
 import imgui.ImGui;
+import org.joml.Quaternionf;
 import org.joml.Vector3f;
 import org.lwjgl.BufferUtils;
 import org.lwjgl.glfw.GLFWErrorCallback;
@@ -13,6 +14,7 @@ import org.lwjgl.system.windows.User32;
 import rsim2.camera.Camera;
 import rsim2.collision.CollisionResult;
 import rsim2.collision.CollisionWorld;
+import rsim2.collision.MotionCollisionState;
 import rsim2.data.RobotDefinitionDTO;
 import rsim2.editor.Picker;
 import rsim2.editor.SelectionManager;
@@ -39,6 +41,7 @@ import java.nio.ByteBuffer;
 import java.nio.IntBuffer;
 import java.util.ArrayList;
 import java.util.HashSet;
+import java.util.IdentityHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -86,10 +89,13 @@ public class Engine {
     private final rsim2.mcp.McpRobotController mcpRobot = new rsim2.mcp.McpRobotController();
 
     public rsim2.mcp.McpBridge getMcpBridge() { return mcpBridge; }
-    private final rsim2.collision.MotionCollisionState motionCollisionState = new rsim2.collision.MotionCollisionState();
+    private MotionCollisionState motionCollisionState = new MotionCollisionState();
 
     private SceneNode rootNode;
     private List<Joint> joints = new ArrayList<>();
+    private record NodePose(SceneNode parent, Vector3f position, Quaternionf rotation) {}
+    private final Map<SceneNode, NodePose> loadedNodePoses = new IdentityHashMap<>();
+    private final Map<Joint, Float> loadedJointAngles = new IdentityHashMap<>();
     private String currentProjectPath = null;
 
     private long lastAutoSaveTime = 0;
@@ -198,6 +204,7 @@ public class Engine {
         selectionManager = new SelectionManager();
         rootNode = new SceneNode("world");
         joints = new ArrayList<>();
+        rememberLoadedPose(null);
         currentProjectPath = null;
         motionPlayer = new MotionPlayer();
         collisionWorld = new CollisionWorld();
@@ -228,6 +235,7 @@ public class Engine {
 
             this.rootNode = res.rootNode != null ? res.rootNode : new SceneNode("world");
             this.joints = res.joints != null ? res.joints : new ArrayList<>();
+            rememberLoadedPose(res.rootNode);
             this.currentProjectPath = filePath;
 
             if (commandHistory != null) {
@@ -294,6 +302,7 @@ public class Engine {
                 this.rootNode.addChild(res.rootNode);
             }
             this.joints = res.joints != null ? res.joints : new ArrayList<>();
+            rememberLoadedPose(res.rootNode);
 
             File urdfFile = new File(filePath);
             String jsonPath = new File(urdfFile.getParentFile(), "robot.json").getAbsolutePath();
@@ -392,16 +401,109 @@ public class Engine {
         return mcpRobot.hasActiveTask() || (aiPanel != null && aiPanel.hasActiveInteraction());
     }
 
-    public boolean canPlayMotion() {
-        return motionPlayer != null && motionPlayer.hasSequence() && !mcpRobot.hasActiveTask()
-                && (!motionPlayer.getSequence().isIncomplete() || aiPanel != null && aiPanel.hasActiveInteraction());
+    private void rememberLoadedPose(SceneNode robotRoot) {
+        loadedNodePoses.clear();
+        loadedJointAngles.clear();
+        Set<SceneNode> nodes = new HashSet<>();
+        collectSubtree(robotRoot, nodes);
+        for (SceneNode node : nodes) {
+            if (node.isRobotPart()) {
+                loadedNodePoses.put(node, new NodePose(node.getParent(), new Vector3f(node.getLocalPosition()),
+                        new Quaternionf(node.getLocalRotation())));
+            }
+        }
+        for (Joint joint : joints) {
+            // The load-time motor target already accounts for models whose limits exclude zero.
+            var motor = joint.getMotor();
+            if (motor != null) loadedJointAngles.put(joint, motor.getTargetAngleRadians());
+        }
+    }
+
+    public String robotPoseResetBlockReason() {
+        if (loadedNodePoses.isEmpty()) return "Load a robot to set its initial pose.";
+        if (hasActiveMotionTask()) return "Stop the active motion task before resetting the pose.";
+        if (!canReplayInteractions()) return "Clear E-stop and disable Sim2Real sync before resetting the pose.";
+        return null;
+    }
+
+    public boolean resetRobotPose() {
+        if (robotPoseResetBlockReason() != null) return false;
+        if (aiPanel != null) aiPanel.onExternalControl();
+        if (motionPlayer != null) {
+            motionPlayer.bindJoints(joints);
+            motionPlayer.stop();
+        }
+
+        Set<SceneNode> nodes = new HashSet<>();
+        collectSubtree(rootNode, nodes);
+        for (SceneNode node : nodes) {
+            NodePose pose = loadedNodePoses.get(node);
+            if (pose != null && node.getParent() == pose.parent()) {
+                node.getLocalPosition().set(pose.position());
+                node.getLocalRotation().set(pose.rotation());
+            }
+        }
+        for (Joint joint : joints) {
+            Float angle = loadedJointAngles.get(joint);
+            var motor = joint.getMotor();
+            if (angle != null && motor != null) {
+                motor.setTargetAngleRadians(angle);
+                joint.setAngle(motor.getTargetAngleRadians());
+                motor.setCurrentVelocity(0);
+            }
+        }
+        motionCollisionState = new MotionCollisionState();
+        motionCollisionState.beginStep(rootNode, joints);
+        return true;
+    }
+
+    public String motionPlaybackBlockReason() {
+        if (motionPlayer == null || !motionPlayer.hasSequence()) return "No motion is loaded.";
+        boolean aiBusy = aiPanel != null && aiPanel.hasActiveInteraction();
+        if (mcpRobot.hasActiveTask()) {
+            if (!aiBusy && mcpRobot.canResumeTask(rootNode, joints, motionPlayer)) return null;
+            if (!canReplayInteractions()) return "Clear E-stop and disable Sim2Real sync before resuming.";
+            return "An MCP motion is active.";
+        }
+        MotionSequence sequence = motionPlayer.getSequence();
+        if (sequence.isIncomplete() && !aiBusy && !canReplayInteractions()) {
+            return "Clear E-stop and disable Sim2Real sync before previewing the motion.";
+        }
+        if (!sequence.isIncomplete() && !sequence.getEvents().isEmpty() && !canReplayInteractions())
+            return "Clear E-stop and disable Sim2Real sync before replaying interactions.";
+        return null;
+    }
+
+    public String motionPlaybackHint() {
+        String blockReason = motionPlaybackBlockReason();
+        if (blockReason != null) return blockReason;
+        if (motionPlayer.getSequence().isIncomplete() && !hasActiveMotionTask()) {
+            String reason = mcpRobot.incompleteMotionReason(motionPlayer);
+            String hint = "Play the joint motion in simulation. Grasp and release events are skipped.";
+            return reason.isBlank() ? hint : hint + "\nLast attempt: " + reason;
+        }
+        return "Play / Pause Motion";
+    }
+
+    public void pauseMotion() {
+        if (motionPlayer == null || mcpRobot.pauseTask(motionPlayer, joints)) return;
+        motionPlayer.bindJoints(joints);
+        motionPlayer.pause();
     }
 
     public void playMotion() {
-        if (!canPlayMotion()) throw new IllegalArgumentException("No playable motion is ready.");
+        String reason = motionPlaybackBlockReason();
+        if (reason != null) throw new IllegalArgumentException(reason);
+        if (mcpRobot.hasActiveTask()) {
+            mcpRobot.resumeTask(rootNode, joints, motionPlayer);
+            return;
+        }
         MotionSequence sequence = motionPlayer.getSequence();
+        if (sequence.isIncomplete() && !hasActiveMotionTask()) {
+            motionPlayer.playIncompletePreview();
+            return;
+        }
         if (!sequence.getEvents().isEmpty() && !sequence.isIncomplete()) {
-            if (!canReplayInteractions()) throw new IllegalArgumentException("Clear E-stop and disable Sim2Real sync before replaying interactions.");
             if (motionPlayer.startsNewPlayback()) sequence.validateReplay(rootNode, aiPanel.getObjectInteractions());
         }
         motionPlayer.play();
@@ -523,7 +625,8 @@ public class Engine {
                         if (aiPanel != null) aiPanel.onExternalControl();
                     }));
 
-            if (motionPlayer.isReplayingEvents() && !canReplayInteractions()) motionPlayer.cancelReplay();
+            if ((motionPlayer.isReplayingEvents() || motionPlayer.isPreviewingIncompleteMotion())
+                    && !canReplayInteractions()) motionPlayer.cancelReplay();
             if (motionPlayer.isPlaying()) {
                 motionPlayer.update(mcpRobot.limitDelta(deltaTime, motionPlayer), joints);
             } else if (joints != null) {

@@ -36,6 +36,10 @@ public class SimToRealBridgeTest {
             System.out.println("[PASS] testSafetyFilterEmergencyStop");
 
             test.setup();
+            test.testServoMappingKeepsSimulationAngleHistory();
+            System.out.println("[PASS] testServoMappingKeepsSimulationAngleHistory");
+
+            test.setup();
             test.testMockHardwareBridgeStreaming();
             System.out.println("[PASS] testMockHardwareBridgeStreaming");
 
@@ -56,6 +60,18 @@ public class SimToRealBridgeTest {
             System.out.println("[PASS] testArduinoSketchGenerationWithPins");
 
             test.setup();
+            test.testArduinoSingleServoPreservesSignedTrajectory();
+            System.out.println("[PASS] testArduinoSingleServoPreservesSignedTrajectory");
+
+            test.setup();
+            test.testArduinoExportRejectsClippingAndDuplicatePins();
+            System.out.println("[PASS] testArduinoExportRejectsClippingAndDuplicatePins");
+
+            test.setup();
+            test.testDigitalTwinTelemetryDispatch();
+            System.out.println("[PASS] testDigitalTwinTelemetryDispatch");
+
+            test.setup();
             test.testPythonScriptGenerationForRaspberryPi();
             System.out.println("[PASS] testPythonScriptGenerationForRaspberryPi");
 
@@ -63,7 +79,7 @@ public class SimToRealBridgeTest {
             test.testMotorVelocityProfileAndAccelerationRamp();
             System.out.println("[PASS] testMotorVelocityProfileAndAccelerationRamp");
 
-            System.out.println("\nALL 10 SIM-TO-REAL & MOTOR DYNAMICS TESTS PASSED SUCCESSFULLY (100%)!");
+            System.out.println("\nSIM-TO-REAL & MOTOR DYNAMICS TESTS PASSED");
         } catch (Throwable t) {
             System.err.println("\n[FAIL] Test threw exception: " + t.getMessage());
             t.printStackTrace();
@@ -120,6 +136,18 @@ public class SimToRealBridgeTest {
 
         filter.resetEmergencyStop();
         assertFalse(filter.isEmergencyStopActive());
+    }
+
+    @Test
+    public void testServoMappingKeepsSimulationAngleHistory() {
+        SafetyFilter filter = new SafetyFilter();
+        filter.setEnforceServo0To180(true);
+        Map<String, Float> pose = Map.of("joint_1", 0.0f);
+        for (int i = 0; i < 3; i++) {
+            assertEquals(90.0f, filter.processAndFilter(pose, testJoints).get("joint_1"), 0.001f);
+        }
+        filter.setEnforceServo0To180(false);
+        assertEquals(0.0f, filter.processAndFilter(pose, testJoints).get("joint_1"), 0.001f);
     }
 
     @Test
@@ -246,14 +274,57 @@ public class SimToRealBridgeTest {
 
         String sketch = TrajectoryExporter.toArduinoSketch(seq, testJoints, 20);
         assertNotNull(sketch);
-        assertTrue(sketch.contains("#define PIN_JOINT_1 11"));
-        assertTrue(sketch.contains("#define INVERT_JOINT_1 1"));
-        assertTrue(sketch.contains("#define OFFSET_JOINT_1 5.0f"));
-        assertTrue(sketch.contains("#define PIN_JOINT_2 12"));
-        assertTrue(sketch.contains("#define INVERT_JOINT_2 0"));
-        assertTrue(sketch.contains("servos[j].attach(SERVO_PINS[j]);"));
-        assertTrue(sketch.contains("void setup()"));
-        assertTrue(sketch.contains("void loop()"));
+        assertTrue(sketch.contains("11, // joint_1"));
+        assertTrue(sketch.contains("12, // joint_2"));
+        assertTrue(sketch.contains("{ 85, 100 }"));
+        assertTrue(sketch.contains("{ 65, 120 }"));
+        assertTrue(sketch.contains("servos[joint].attach(SERVO_PINS[joint]);"));
+        assertTrue(sketch.contains("void loop() {\n    playTrajectory();"));
+    }
+
+    @Test
+    public void testArduinoSingleServoPreservesSignedTrajectory() {
+        Joint shoulder = testJoints.get(0);
+        shoulder.setPin(11);
+        shoulder.setZeroOffsetDeg(0.3f);
+        MotionSequence seq = new MotionSequence("Signed shoulder", 1.0f, false);
+        seq.addKeyframe(new Keyframe(0.0f, Map.of("joint_1", -90.0f, "joint_2", 180.0f)));
+        seq.addKeyframe(new Keyframe(1.0f, Map.of("joint_1", 0.0f, "joint_2", 180.0f)));
+
+        String sketch = TrajectoryExporter.toArduinoSketch(seq, testJoints, 2, "joint_1", 9, true);
+        assertTrue(sketch.contains("JOINT_COUNT = 1"));
+        assertTrue(sketch.contains("9, // joint_1"));
+        assertFalse(sketch.contains("joint_2"));
+        assertTrue(sketch.contains("FRAME_INTERVAL_US = 500000"));
+        assertTrue(sketch.contains("DURATION_US = 1000000"));
+        assertTrue(sketch.contains("{ 0 },\n    { 45 },\n    { 90 },"));
+        assertTrue(sketch.contains("void loop() {\n}"));
+    }
+
+    @Test
+    public void testArduinoExportRejectsClippingAndDuplicatePins() {
+        MotionSequence seq = new MotionSequence("Pin and angle validation", 0.275f, false);
+        seq.addKeyframe(new Keyframe(0.0f, Map.of("joint_1", -45.0f, "joint_2", 20.0f)));
+        seq.addKeyframe(new Keyframe(0.275f, Map.of("joint_1", 0.0f, "joint_2", 40.0f)));
+        testJoints.get(1).setPin(9);
+        String sketch = TrajectoryExporter.toArduinoSketch(seq, testJoints, 10);
+        assertTrue(sketch.contains("10, // joint_1"));
+        assertTrue(sketch.contains("9, // joint_2"));
+        assertTrue(sketch.contains("FRAME_COUNT = 4"));
+        assertTrue(sketch.contains("DURATION_US = 275000"));
+        assertTrue(sketch.contains("{ 90, 130 },"));
+
+        String direct = TrajectoryExporter.toArduinoSketch(seq, testJoints, 10, "joint_2", 9, false);
+        assertTrue(direct.contains("{ 20 },"));
+        assertTrue(direct.contains("{ 40 },"));
+        var rangeError = assertThrows(IllegalArgumentException.class,
+                () -> TrajectoryExporter.toArduinoSketch(seq, testJoints, 10, "joint_1", 9, false));
+        assertTrue(rangeError.getMessage().contains("joint_1 maps to -45.00"));
+
+        testJoints.get(0).setPin(9);
+        var pinError = assertThrows(IllegalArgumentException.class,
+                () -> TrajectoryExporter.toArduinoSketch(seq, testJoints, 10));
+        assertTrue(pinError.getMessage().contains("assigned more than once"));
     }
 
     @Test

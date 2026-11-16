@@ -112,6 +112,15 @@ public class MotionSequence {
     }
 
     public void sample(float timeSeconds, Map<String, Float> outAngles) {
+        float t = timeSeconds;
+        if (loop && durationSeconds > 0.0f) {
+            t = t % durationSeconds;
+            if (t < 0) t += durationSeconds;
+        }
+        sampleClamped(t, outAngles);
+    }
+
+    public void sampleClamped(float timeSeconds, Map<String, Float> outAngles) {
         if (outAngles == null) return;
         outAngles.clear();
 
@@ -124,14 +133,7 @@ public class MotionSequence {
             return;
         }
 
-        float t = timeSeconds;
-        if (loop && durationSeconds > 0.0f) {
-            t = t % durationSeconds;
-            if (t < 0) t += durationSeconds;
-        } else {
-            t = Math.max(0.0f, Math.min(durationSeconds, t));
-        }
-
+        float t = Math.max(0.0f, Math.min(durationSeconds, timeSeconds));
         Keyframe prevKf = keyframes.get(0);
         Keyframe nextKf = keyframes.get(keyframes.size() - 1);
 

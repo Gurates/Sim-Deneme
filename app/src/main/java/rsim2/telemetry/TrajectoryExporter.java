@@ -5,6 +5,7 @@ import com.google.gson.GsonBuilder;
 import rsim2.motion.Keyframe;
 import rsim2.motion.MotionSequence;
 import rsim2.scene.Joint;
+import rsim2.scene.JointType;
 
 import java.io.File;
 import java.io.FileWriter;
@@ -101,139 +102,170 @@ public class TrajectoryExporter {
         return sb.toString();
     }
 
+    public static List<String> arduinoJointIds(MotionSequence sequence, List<Joint> joints) {
+        Map<String, Joint> model = jointsById(joints);
+        return sequence.getKeyframes().stream()
+                .flatMap(frame -> frame.getJointAnglesDegrees().keySet().stream())
+                .distinct()
+                .filter(id -> !model.containsKey(id) || model.get(id).getType() != JointType.FIXED)
+                .sorted()
+                .toList();
+    }
+
     public static String toArduinoSketch(MotionSequence sequence, List<Joint> joints, int sampleRateHz) {
+        return toArduinoSketch(sequence, joints, sampleRateHz, null, -1, true);
+    }
+
+    public static String toArduinoSketch(MotionSequence sequence, List<Joint> joints, int sampleRateHz,
+                                         String selectedJoint, int selectedPin, boolean centered) {
         if (sequence == null) return "// No sequence loaded\n";
-
-        float duration = sequence.getDurationSeconds();
-        int totalFrames = Math.max(2, (int) (duration * sampleRateHz));
-        float dt = duration / (float) (totalFrames - 1);
-
-        Set<String> jointNamesSet = new LinkedHashSet<>();
-        for (Keyframe kf : sequence.getKeyframes()) {
-            jointNamesSet.addAll(kf.getJointAnglesDegrees().keySet());
+        if (sequence.isIncomplete()) throw new IllegalArgumentException("Wait for the motion to finish recording.");
+        List<String> ids = arduinoJointIds(sequence, joints);
+        if (ids.isEmpty()) return "// Sequence contains no movable joints\n";
+        if (selectedJoint != null) {
+            if (!ids.contains(selectedJoint)) throw new IllegalArgumentException("Joint is missing from the motion.");
+            if (selectedPin < 0 || selectedPin > 255) throw new IllegalArgumentException("Enter a valid Arduino pin.");
+            ids = List.of(selectedJoint);
         }
-        List<String> jointNames = new ArrayList<>(jointNamesSet);
-        Collections.sort(jointNames);
-        if (jointNames.isEmpty()) {
-            return "// Sequence contains no joint angles\n";
-        }
+        Map<String, Joint> model = jointsById(joints);
+        Map<String, Integer> pins = arduinoPins(ids, model, selectedJoint, selectedPin);
 
-        Map<String, Joint> jointMap = new HashMap<>();
-        if (joints != null) {
-            for (Joint j : joints) {
-                if (j != null && j.getId() != null) {
-                    jointMap.put(j.getId(), j);
+        long durationUs = Math.round(sequence.getDurationSeconds() * 1_000_000.0);
+        if (sampleRateHz < 1 || sampleRateHz > 200 || durationUs < 1 || durationUs > Integer.MAX_VALUE) {
+            throw new IllegalArgumentException("Arduino export requires a valid motion duration and a rate of 1–200 Hz.");
+        }
+        long intervalUs = Math.round(1_000_000.0 / sampleRateHz);
+        int frameCount = (int) Math.ceilDiv(durationUs, intervalUs) + 1;
+
+        StringBuilder sketch = new StringBuilder();
+        sketch.append("// RSim2 standalone Arduino servo trajectory\n");
+        sketch.append("// Simulation 0 deg maps to ")
+                .append(centered ? "90 servo degrees before offset." : "0 servo degrees before inversion and offset.")
+                .append("\n");
+        sketch.append("#include <Arduino.h>\n#include <Servo.h>\n\n");
+        sketch.append("constexpr uint32_t FRAME_COUNT = ").append(frameCount).append(";\n");
+        sketch.append("constexpr uint32_t FRAME_INTERVAL_US = ").append(intervalUs).append(";\n");
+        sketch.append("constexpr uint32_t DURATION_US = ").append(durationUs).append(";\n");
+        sketch.append("constexpr size_t JOINT_COUNT = ").append(ids.size()).append(";\n");
+        sketch.append("constexpr uint8_t SERVO_PINS[JOINT_COUNT] = {\n");
+        for (String id : ids) {
+            sketch.append("    ").append(pins.get(id)).append(", // ").append(id.replaceAll("[\\p{Cntrl}]", " "))
+                    .append(" (servo pin)\n");
+        }
+        sketch.append("""
+                };
+                #ifdef MAX_SERVOS
+                static_assert(JOINT_COUNT <= MAX_SERVOS, "Too many servos for this board");
+                #endif
+                """);
+        sketch.append("#ifdef NUM_DIGITAL_PINS\n");
+        for (int pin : pins.values()) {
+            sketch.append("static_assert(").append(pin)
+                    .append(" < NUM_DIGITAL_PINS, \"Invalid servo pin for this board\");\n");
+        }
+        sketch.append("#endif\n\n");
+        sketch.append("const uint8_t SERVO_TARGETS[FRAME_COUNT][JOINT_COUNT] PROGMEM = {\n");
+
+        Map<String, Float> angles = new HashMap<>();
+        Map<String, Float> lastAngles = new HashMap<>();
+        for (Keyframe frame : sequence.getKeyframes()) {
+            frame.getJointAnglesDegrees().forEach(lastAngles::putIfAbsent);
+        }
+        for (int frame = 0; frame < frameCount; frame++) {
+            long timeUs = Math.min(frame * intervalUs, durationUs);
+            float time = frame == frameCount - 1 ? sequence.getDurationSeconds() : timeUs / 1_000_000.0f;
+            sequence.sampleClamped(time, angles);
+            lastAngles.putAll(angles);
+            StringJoiner targets = new StringJoiner(", ", "    { ", " },\n");
+            for (String id : ids) {
+                targets.add(Integer.toString(servoTarget(id, lastAngles.get(id), model.get(id), centered, time)));
+            }
+            sketch.append(targets);
+        }
+        sketch.append("""
+                };
+
+                Servo servos[JOINT_COUNT];
+
+                void writeFrame(uint32_t frame) {
+                    for (size_t joint = 0; joint < JOINT_COUNT; ++joint) {
+                        servos[joint].write(pgm_read_byte(&SERVO_TARGETS[frame][joint]));
+                    }
                 }
+
+                void playTrajectory() {
+                    const uint32_t start = micros();
+                    for (uint32_t frame = 0; frame < FRAME_COUNT; ++frame) {
+                        const uint32_t offset = min(frame * FRAME_INTERVAL_US, DURATION_US);
+                        while ((uint32_t)(micros() - start) < offset) {
+                            delayMicroseconds(100);
+                        }
+                        writeFrame(frame);
+                    }
+                }
+
+                void setup() {
+                    for (size_t joint = 0; joint < JOINT_COUNT; ++joint) {
+                        servos[joint].attach(SERVO_PINS[joint]);
+                    }
+                    writeFrame(0);
+                    delay(1000); // Let the servos reach the starting pose.
+                """);
+        if (!sequence.isLoop()) sketch.append("    playTrajectory();\n");
+        sketch.append("}\n\nvoid loop() {\n");
+        if (sequence.isLoop()) sketch.append("    playTrajectory();\n");
+        sketch.append("}\n");
+        return sketch.toString();
+    }
+
+    private static int servoTarget(String id, float simulationDeg, Joint joint, boolean centered, float time) {
+        if (joint != null) {
+            float radians = (float) Math.toRadians(simulationDeg);
+            simulationDeg = (float) Math.toDegrees(Math.clamp(radians, joint.getMinLimit(), joint.getMaxLimit()));
+        }
+        boolean inverted = joint != null && joint.isInverted();
+        float offset = joint == null ? 0.0f : joint.getZeroOffsetDeg();
+        float base = centered ? 90.0f : (inverted ? 180.0f : 0.0f);
+        float target = base + (inverted ? -simulationDeg : simulationDeg) + offset;
+        if (!Float.isFinite(target) || target < -0.001f || target > 180.001f) {
+            throw new IllegalArgumentException(String.format(Locale.US,
+                    "%s maps to %.2f servo degrees at %.3f s. Adjust the mapping, offset or motion to fit 0–180 degrees.",
+                    id, target, time));
+        }
+        return Math.round(Math.clamp(target, 0.0f, 180.0f));
+    }
+
+    private static Map<String, Joint> jointsById(List<Joint> joints) {
+        Map<String, Joint> model = new HashMap<>();
+        if (joints != null) {
+            for (Joint joint : joints) {
+                if (joint != null && joint.getId() != null) model.put(joint.getId(), joint);
             }
         }
+        return model;
+    }
 
-        StringBuilder sb = new StringBuilder();
-        sb.append("// ==========================================================\n");
-        sb.append("// RSim2 Sim-to-Real Standalone Arduino Sketch (.ino)\n");
-        sb.append("// Sequence: ").append(sequence.getName()).append("\n");
-        sb.append("// Total Joints: ").append(jointNames.size()).append(", Duration: ").append(duration).append("s\n");
-        sb.append("// Zero-Code Auto-Generated from RSim2 Visual Studio\n");
-        sb.append("// ==========================================================\n\n");
-        sb.append("#include <Arduino.h>\n");
-        sb.append("#include <Servo.h>\n\n");
-
-        sb.append("#define TRAJECTORY_FRAMES ").append(totalFrames).append("\n");
-        sb.append("#define TRAJECTORY_JOINTS ").append(jointNames.size()).append("\n");
-        sb.append("#define TRAJECTORY_DT_MS  ").append(Math.round(dt * 1000)).append("\n\n");
-
-        sb.append("// Hardware Pin & Calibration Mapping (From Inspector):\n");
-        for (int i = 0; i < jointNames.size(); i++) {
-            String name = jointNames.get(i);
-            String safeMacro = name.replaceAll("[^a-zA-Z0-9_]", "_").toUpperCase(Locale.ROOT);
-            Joint j = jointMap.get(name);
-            int pin = (j != null && j.getPin() > 0) ? j.getPin() : (9 + i);
-            boolean inv = (j != null && j.isInverted());
-            float offset = (j != null) ? j.getZeroOffsetDeg() : 0.0f;
-
-            sb.append("#define PIN_").append(safeMacro).append(" ").append(pin).append("\n");
-            sb.append("#define INVERT_").append(safeMacro).append(" ").append(inv ? 1 : 0).append("\n");
-            sb.append("#define OFFSET_").append(safeMacro).append(" ").append(String.format(Locale.US, "%.1ff", offset)).append("\n");
+    private static Map<String, Integer> arduinoPins(List<String> ids, Map<String, Joint> model,
+                                                     String selectedJoint, int selectedPin) {
+        if (selectedJoint != null) return Map.of(selectedJoint, selectedPin);
+        Map<String, Integer> pins = new LinkedHashMap<>();
+        Set<Integer> usedPins = new HashSet<>();
+        for (String id : ids) {
+            Joint joint = model.get(id);
+            if (joint == null || joint.getPin() < 0) continue;
+            int pin = joint.getPin();
+            if (pin > 255) throw new IllegalArgumentException(id + " has an invalid Arduino pin.");
+            if (!usedPins.add(pin)) throw new IllegalArgumentException("Arduino pin " + pin + " is assigned more than once.");
+            pins.put(id, pin);
         }
-        sb.append("\n");
-
-        sb.append("const int SERVO_PINS[TRAJECTORY_JOINTS] = {\n");
-        for (int i = 0; i < jointNames.size(); i++) {
-            String safeMacro = jointNames.get(i).replaceAll("[^a-zA-Z0-9_]", "_").toUpperCase(Locale.ROOT);
-            sb.append("    PIN_").append(safeMacro);
-            if (i < jointNames.size() - 1) sb.append(",");
-            sb.append("\n");
+        int nextPin = 9;
+        for (String id : ids) {
+            if (pins.containsKey(id)) continue;
+            while (usedPins.contains(nextPin)) nextPin++;
+            if (nextPin > 255) throw new IllegalArgumentException("Too many Arduino pins requested.");
+            pins.put(id, nextPin++);
         }
-        sb.append("};\n\n");
-
-        sb.append("const bool SERVO_INVERT[TRAJECTORY_JOINTS] = {\n");
-        for (int i = 0; i < jointNames.size(); i++) {
-            String safeMacro = jointNames.get(i).replaceAll("[^a-zA-Z0-9_]", "_").toUpperCase(Locale.ROOT);
-            sb.append("    INVERT_").append(safeMacro);
-            if (i < jointNames.size() - 1) sb.append(",");
-            sb.append("\n");
-        }
-        sb.append("};\n\n");
-
-        sb.append("const float SERVO_OFFSET[TRAJECTORY_JOINTS] = {\n");
-        for (int i = 0; i < jointNames.size(); i++) {
-            String safeMacro = jointNames.get(i).replaceAll("[^a-zA-Z0-9_]", "_").toUpperCase(Locale.ROOT);
-            sb.append("    OFFSET_").append(safeMacro);
-            if (i < jointNames.size() - 1) sb.append(",");
-            sb.append("\n");
-        }
-        sb.append("};\n\n");
-
-        sb.append("Servo servos[TRAJECTORY_JOINTS];\n\n");
-
-        sb.append("const float PROGMEM TRAJECTORY_DATA[TRAJECTORY_FRAMES][TRAJECTORY_JOINTS] = {\n");
-        Map<String, Float> sampled = new HashMap<>();
-        for (int f = 0; f < totalFrames; f++) {
-            float t = f * dt;
-            sequence.sample(t, sampled);
-
-            sb.append("    { ");
-            for (int j = 0; j < jointNames.size(); j++) {
-                String name = jointNames.get(j);
-                float deg = sampled.getOrDefault(name, 0.0f);
-                sb.append(String.format(Locale.US, "%.2ff", deg));
-                if (j < jointNames.size() - 1) sb.append(", ");
-            }
-            sb.append(" }");
-            if (f < totalFrames - 1) sb.append(",");
-            sb.append(" // t = ").append(String.format(Locale.US, "%.3fs", t)).append("\n");
-        }
-        sb.append("};\n\n");
-
-        sb.append("void setup() {\n");
-        sb.append("    Serial.begin(115200);\n");
-        sb.append("    Serial.println(F(\"RSim2 Trajectory Player Starting...\"));\n\n");
-        sb.append("    for (int j = 0; j < TRAJECTORY_JOINTS; j++) {\n");
-        sb.append("        servos[j].attach(SERVO_PINS[j]);\n");
-        sb.append("        float initialAngle = pgm_read_float(&TRAJECTORY_DATA[0][j]);\n");
-        sb.append("        if (SERVO_INVERT[j]) initialAngle = 180.0f - initialAngle;\n");
-        sb.append("        initialAngle += SERVO_OFFSET[j];\n");
-        sb.append("        servos[j].write((int) constrain(round(initialAngle), 0, 180));\n");
-        sb.append("    }\n");
-        sb.append("    delay(1000); // Wait for servos to reach initial position\n");
-        sb.append("}\n\n");
-
-        sb.append("void loop() {\n");
-        sb.append("    for (int frame = 0; frame < TRAJECTORY_FRAMES; frame++) {\n");
-        sb.append("        for (int j = 0; j < TRAJECTORY_JOINTS; j++) {\n");
-        sb.append("            float rawAngle = pgm_read_float(&TRAJECTORY_DATA[frame][j]);\n");
-        sb.append("            if (SERVO_INVERT[j]) {\n");
-        sb.append("                rawAngle = 180.0f - rawAngle;\n");
-        sb.append("            }\n");
-        sb.append("            rawAngle += SERVO_OFFSET[j];\n");
-        sb.append("            int cmd = (int) constrain(round(rawAngle), 0, 180);\n");
-        sb.append("            servos[j].write(cmd);\n");
-        sb.append("        }\n");
-        sb.append("        delay(TRAJECTORY_DT_MS);\n");
-        sb.append("    }\n");
-        sb.append("    delay(2000); // Pause before repeating sequence\n");
-        sb.append("}\n");
-
-        return sb.toString();
+        return pins;
     }
 
     public static String toCsv(MotionSequence sequence, int sampleRateHz) {

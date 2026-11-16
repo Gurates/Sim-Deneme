@@ -18,6 +18,7 @@ public class MotionPlayer {
     private long stopGeneration;
     private long seekGeneration;
     private boolean replayingEvents;
+    private boolean previewingIncompleteMotion;
     private int nextEvent;
     private int nextReplayFrame;
     private List<Joint> controlledJoints = List.of();
@@ -33,6 +34,7 @@ public class MotionPlayer {
         this.currentTime = 0.0f;
         this.isLooping = sequence != null && sequence.isLoop();
         replayingEvents = false;
+        previewingIncompleteMotion = false;
         nextEvent = 0;
     }
 
@@ -53,6 +55,20 @@ public class MotionPlayer {
             replayingEvents = true;
             nextEvent = 0;
             nextReplayFrame = 0;
+        }
+        isPlaying = true;
+    }
+
+    /** Preview the joint keyframes of an interrupted interaction without replaying its events. */
+    public void playIncompletePreview() {
+        if (!hasSequence() || !sequence.isIncomplete()) {
+            throw new IllegalArgumentException("No incomplete motion is loaded.");
+        }
+        if (!previewingIncompleteMotion) {
+            currentTime = 0;
+            nextReplayFrame = 0;
+            replayingEvents = false;
+            previewingIncompleteMotion = true;
         }
         isPlaying = true;
     }
@@ -81,6 +97,7 @@ public class MotionPlayer {
         stopGeneration++;
         pause();
         replayingEvents = false;
+        previewingIncompleteMotion = false;
         nextEvent = 0;
         currentTime = 0.0f;
     }
@@ -107,6 +124,8 @@ public class MotionPlayer {
             if (nextEvent < sequence.getEvents().size()) {
                 nextTime = Math.min(nextTime, sequence.getEvents().get(nextEvent).timeSeconds());
             }
+        }
+        if (replayingEvents || previewingIncompleteMotion) {
             List<Keyframe> frames = sequence.getKeyframes();
             if (nextReplayFrame < frames.size() && nextTime >= frames.get(nextReplayFrame).getTimeSeconds()) {
                 nextTime = frames.get(nextReplayFrame).getTimeSeconds();
@@ -119,11 +138,12 @@ public class MotionPlayer {
 
         float duration = sequence.getDurationSeconds();
         if (currentTime >= duration) {
-            if (isLooping || sequence.isLoop()) {
+            if (!previewingIncompleteMotion && (isLooping || sequence.isLoop())) {
                 currentTime = currentTime % duration;
             } else {
                 currentTime = duration;
                 isPlaying = false;
+                previewingIncompleteMotion = false;
             }
         }
 
@@ -131,13 +151,14 @@ public class MotionPlayer {
     }
 
     public boolean isReplayingEvents() { return replayingEvents; }
+    public boolean isPreviewingIncompleteMotion() { return previewingIncompleteMotion; }
 
     public boolean startsNewPlayback() {
         return !replayingEvents && (currentTime == 0.0f || currentTime >= getDuration());
     }
 
     public void cancelReplay() {
-        if (replayingEvents) stop();
+        if (replayingEvents || previewingIncompleteMotion) stop();
     }
 
 

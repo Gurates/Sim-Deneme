@@ -10,7 +10,7 @@ public class SafetyFilter {
     private boolean emergencyStopActive = false;
     private boolean collisionStopActive = false;
     private boolean preventCollisionStreaming = true;
-    private final Map<String, Float> lastSentAngles = new HashMap<>();
+    private final Map<String, Float> lastFilteredSimulationAngles = new HashMap<>();
 
     private float maxDegreesPerSecond = 180.0f;
     private float maxDegreesPerStep = 45.0f;
@@ -76,20 +76,20 @@ public class SafetyFilter {
 
             float clampedDeg = Math.max(minDeg, Math.min(maxDeg, rawDeg));
 
-            if (lastSentAngles.containsKey(jointId)) {
-                float lastDeg = lastSentAngles.get(jointId);
+            Float lastDeg = lastFilteredSimulationAngles.get(jointId);
+            if (lastDeg != null) {
                 float delta = clampedDeg - lastDeg;
                 if (Math.abs(delta) > maxDeltaThisStep) {
                     clampedDeg = lastDeg + Math.signum(delta) * maxDeltaThisStep;
                 }
             }
 
+            lastFilteredSimulationAngles.put(jointId, clampedDeg);
             if (enforceServo0To180) {
                 clampedDeg = Math.max(0.0f, Math.min(180.0f, clampedDeg + 90.0f));
             }
 
             safeAngles.put(jointId, clampedDeg);
-            lastSentAngles.put(jointId, clampedDeg);
         }
 
         return safeAngles;

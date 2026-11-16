@@ -3,6 +3,7 @@ package rsim2.ui;
 import imgui.ImGui;
 import imgui.flag.ImGuiCol;
 import imgui.flag.ImGuiCond;
+import imgui.flag.ImGuiHoveredFlags;
 import imgui.flag.ImGuiSliderFlags;
 import imgui.flag.ImGuiWindowFlags;
 import imgui.type.ImBoolean;
@@ -164,14 +165,12 @@ public class ToolbarPanel {
 
 
         boolean isPlaying = (motionPlayer != null && motionPlayer.isPlaying());
+        String playbackBlockReason = isPlaying ? null : engine.motionPlaybackBlockReason();
         if (isPlaying) {
             ImGui.pushStyleColor(ImGuiCol.Button, 0.85f, 0.50f, 0.15f, 1.0f);
             ImGui.pushStyleColor(ImGuiCol.ButtonHovered, 0.95f, 0.60f, 0.25f, 1.0f);
             if (ImGui.button("|| Pause", 68.0f, 24.0f)) {
-                if (motionPlayer != null) {
-                    motionPlayer.bindJoints(engine.getJoints());
-                    motionPlayer.pause();
-                }
+                engine.pauseMotion();
             }
             ImGui.popStyleColor(2);
         } else {
@@ -179,7 +178,7 @@ public class ToolbarPanel {
                 ImGui.pushStyleColor(ImGuiCol.Button, 0.18f, 0.68f, 0.35f, 1.0f);
                 ImGui.pushStyleColor(ImGuiCol.ButtonHovered, 0.22f, 0.78f, 0.42f, 1.0f);
             }
-            ImGui.beginDisabled(!engine.canPlayMotion());
+            ImGui.beginDisabled(playbackBlockReason != null);
             if (ImGui.button("> Play", 68.0f, 24.0f)) {
                 try {
                     engine.playMotion();
@@ -194,8 +193,8 @@ public class ToolbarPanel {
                 ImGui.popStyleColor(2);
             }
         }
-        if (ImGui.isItemHovered()) {
-            ImGui.setTooltip(hasSequence ? "Play / Pause Motion" : "Generate a motion in AI panel to play it here.");
+        if (ImGui.isItemHovered(ImGuiHoveredFlags.AllowWhenDisabled)) {
+            ImGui.setTooltip(isPlaying ? "Pause Motion" : engine.motionPlaybackHint());
         }
 
         ImGui.sameLine();
@@ -346,6 +345,18 @@ public class ToolbarPanel {
         ImGui.beginDisabled(player.isPlaying() || engine.hasActiveMotionTask() || player.isReplayingEvents());
         if (ImGui.button("Load Motion")) chooseMotionFile(player, false);
         ImGui.endDisabled();
+
+        ImGui.sameLine();
+        String resetBlockReason = engine.robotPoseResetBlockReason();
+        ImGui.beginDisabled(resetBlockReason != null);
+        if (ImGui.button("Reset Pose") && engine.resetRobotPose()) {
+            motionStatus = "Robot reset to its initial pose.";
+        }
+        ImGui.endDisabled();
+        if (ImGui.isItemHovered(ImGuiHoveredFlags.AllowWhenDisabled)) {
+            ImGui.setTooltip(resetBlockReason != null ? resetBlockReason : "Return the robot to its scene-load pose");
+        }
+
         if (!motionStatus.isEmpty()) ImGui.textWrapped(motionStatus);
         ImGui.endPopup();
     }

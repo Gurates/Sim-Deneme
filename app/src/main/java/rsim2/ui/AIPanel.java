@@ -450,7 +450,8 @@ public class AIPanel {
             return;
         }
         if (java.util.Set.of("duraklat", "pause").contains(control)) {
-            motionPlayer.pause();
+            if (engine == null) motionPlayer.pause();
+            else engine.pauseMotion();
             return;
         }
         if (java.util.Set.of("dur", "durdur", "stop").contains(control)) {
