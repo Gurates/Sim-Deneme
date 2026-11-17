@@ -445,7 +445,6 @@ public class ObjectInteractionController {
         return targets;
     }
 
-    // Coordinate descent evaluates real FK, including imported origin rotations and joint limits.
 
     private float[] solve(List<Joint> chain, SceneNode tool, Vector3f offset, Vector3f target, BooleanSupplier valid) {
         return solve(chain, tool, offset, target, valid, false);
@@ -507,7 +506,6 @@ public class ObjectInteractionController {
         return tool.getWorldTransform().transformPosition(new Vector3f(offset));
     }
 
-    // Damped Jacobian IK handles coupled joints that coordinate descent alone stalls on.
     private static void improvePosition(List<Joint> chain, SceneNode tool, Vector3f offset, Vector3f target) {
         Vector3f point = toolPoint(tool, offset);
         Vector3f error = new Vector3f(target).sub(point);

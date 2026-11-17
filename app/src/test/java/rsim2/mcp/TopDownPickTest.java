@@ -111,7 +111,6 @@ class TopDownPickTest {
                 ]}
                 """);
         MotionSequence sequence = player.getSequence();
-        // Incomplete recordings may already contain recorded events from an earlier phase.
         sequence.addEvent(new MotionEvent(0, "box", "tool", new Vector3f()));
         player.update(robot.limitDelta(.01f, player), joints);
         player.pause();
@@ -122,7 +121,7 @@ class TopDownPickTest {
         assertEquals(0, player.getCurrentTime());
         assertTrue(player.isPlaying());
         assertFalse(player.isReplayingEvents());
-        player.update(100, joints); // First frame is applied without skipping to the final pose.
+        player.update(100, joints);
         player.applyReplayEvents(root, joints, new ObjectInteractionController());
         assertSame(root, box.getParent());
         player.update(100, joints);
