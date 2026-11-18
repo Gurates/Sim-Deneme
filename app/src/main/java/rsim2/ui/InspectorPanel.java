@@ -296,14 +296,13 @@ public class InspectorPanel {
                 ImGui.spacing();
                 ImGui.textColored(0.2f, 0.7f, 1.0f, 1.0f, "Hardware / Pin Mapping");
 
-                int currentPin = existingJoint.getPin();
-                jointPinVal.set(currentPin >= 0 ? currentPin : 9);
+                jointPinVal.set(existingJoint.getPin());
                 ImGui.setNextItemWidth(140.0f);
                 if (ImGui.inputInt("Pin / GPIO / I2C Ch##hwPin", jointPinVal)) {
                     existingJoint.setPin(jointPinVal.get());
                 }
                 if (ImGui.isItemHovered()) {
-                    ImGui.setTooltip("Arduino/ESP32 pin number or Raspberry Pi GPIO / PCA9685 I2C channel (0-15)");
+                    ImGui.setTooltip("Arduino pin, Raspberry Pi GPIO, or PCA9685 channel (0-15). -1 means unassigned.");
                 }
 
                 jointInvertVal.set(existingJoint.isInverted());

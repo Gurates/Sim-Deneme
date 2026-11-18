@@ -172,7 +172,9 @@ public class SimToRealBridgeTest {
 
     @Test
     public void testTrajectoryExporterArduinoHeader() {
-        MotionSequence seq = new MotionSequence("TestWave", 2.0f, true);
+        MotionSequence seq = new MotionSequence("TestWave", 2.0f, false);
+        testJoints.get(0).setPin(9);
+        testJoints.get(1).setPin(10);
 
         Keyframe kf1 = new Keyframe(0.0f);
         kf1.addJointAngle("joint_1", 0.0f);
@@ -185,7 +187,7 @@ public class SimToRealBridgeTest {
         seq.addKeyframe(kf1);
         seq.addKeyframe(kf2);
 
-        String header = TrajectoryExporter.toArduinoHeader(seq, 10);
+        String header = TrajectoryExporter.toArduinoHeader(seq, testJoints, 10);
         assertNotNull(header);
         assertTrue(header.contains("#pragma once"));
         assertTrue(header.contains("TRAJECTORY_DATA"));
@@ -271,15 +273,15 @@ public class SimToRealBridgeTest {
         kf2.addJointAngle("joint_1", 30.0f);
         kf2.addJointAngle("joint_2", 40.0f);
         seq.addKeyframe(kf2);
+        seq.addKeyframe(new Keyframe(1.5f, kf1.getJointAnglesDegrees()));
 
         String sketch = TrajectoryExporter.toArduinoSketch(seq, testJoints, 20);
         assertNotNull(sketch);
-        assertTrue(sketch.contains("11, // joint_1"));
-        assertTrue(sketch.contains("12, // joint_2"));
-        assertTrue(sketch.contains("{ 85, 100 }"));
-        assertTrue(sketch.contains("{ 65, 120 }"));
-        assertTrue(sketch.contains("servos[joint].attach(SERVO_PINS[joint]);"));
-        assertTrue(sketch.contains("void loop() {\n    playTrajectory();"));
+        assertTrue(sketch.contains("{ 11, 544, 2400 }, // joint_1"));
+        assertTrue(sketch.contains("{ 12, 544, 2400 }, // joint_2"));
+        assertTrue(sketch.contains("{ 8500, 10000 }"));
+        assertTrue(sketch.contains("{ 6500, 12000 }"));
+        assertTrue(sketch.contains("TRAJECTORY_LOOP = true"));
     }
 
     @Test
@@ -292,13 +294,12 @@ public class SimToRealBridgeTest {
         seq.addKeyframe(new Keyframe(1.0f, Map.of("joint_1", 0.0f, "joint_2", 180.0f)));
 
         String sketch = TrajectoryExporter.toArduinoSketch(seq, testJoints, 2, "joint_1", 9, true);
-        assertTrue(sketch.contains("JOINT_COUNT = 1"));
-        assertTrue(sketch.contains("9, // joint_1"));
+        assertTrue(sketch.contains("TRAJECTORY_JOINTS = 1"));
+        assertTrue(sketch.contains("{ 9, 544, 2400 }, // joint_1"));
         assertFalse(sketch.contains("joint_2"));
-        assertTrue(sketch.contains("FRAME_INTERVAL_US = 500000"));
-        assertTrue(sketch.contains("DURATION_US = 1000000"));
-        assertTrue(sketch.contains("{ 0 },\n    { 45 },\n    { 90 },"));
-        assertTrue(sketch.contains("void loop() {\n}"));
+        assertTrue(sketch.contains("0, 500000, 1000000,"));
+        assertTrue(sketch.contains("{ 30 },\n    { 4530 },\n    { 9030 },"));
+        assertTrue(sketch.contains("TRAJECTORY_LOOP = false"));
     }
 
     @Test
@@ -307,16 +308,20 @@ public class SimToRealBridgeTest {
         seq.addKeyframe(new Keyframe(0.0f, Map.of("joint_1", -45.0f, "joint_2", 20.0f)));
         seq.addKeyframe(new Keyframe(0.275f, Map.of("joint_1", 0.0f, "joint_2", 40.0f)));
         testJoints.get(1).setPin(9);
+        var missingPin = assertThrows(IllegalArgumentException.class,
+                () -> TrajectoryExporter.toArduinoSketch(seq, testJoints, 10));
+        assertTrue(missingPin.getMessage().contains("pin/channel for joint_1"));
+        testJoints.get(0).setPin(10);
         String sketch = TrajectoryExporter.toArduinoSketch(seq, testJoints, 10);
-        assertTrue(sketch.contains("10, // joint_1"));
-        assertTrue(sketch.contains("9, // joint_2"));
-        assertTrue(sketch.contains("FRAME_COUNT = 4"));
-        assertTrue(sketch.contains("DURATION_US = 275000"));
-        assertTrue(sketch.contains("{ 90, 130 },"));
+        assertTrue(sketch.contains("{ 10, 544, 2400 }, // joint_1"));
+        assertTrue(sketch.contains("{ 9, 544, 2400 }, // joint_2"));
+        assertTrue(sketch.contains("TRAJECTORY_FRAMES = 4"));
+        assertTrue(sketch.contains("0, 100000, 200000, 275000,"));
+        assertTrue(sketch.contains("{ 9000, 13000 },"));
 
         String direct = TrajectoryExporter.toArduinoSketch(seq, testJoints, 10, "joint_2", 9, false);
-        assertTrue(direct.contains("{ 20 },"));
-        assertTrue(direct.contains("{ 40 },"));
+        assertTrue(direct.contains("{ 2000 },"));
+        assertTrue(direct.contains("{ 4000 },"));
         var rangeError = assertThrows(IllegalArgumentException.class,
                 () -> TrajectoryExporter.toArduinoSketch(seq, testJoints, 10, "joint_1", 9, false));
         assertTrue(rangeError.getMessage().contains("joint_1 maps to -45.00"));
@@ -363,7 +368,7 @@ public class SimToRealBridgeTest {
         j2.setInverted(false);
         j2.setZeroOffsetDeg(-5.0f);
 
-        MotionSequence seq = new MotionSequence("RpiTest", 1.0f, true);
+        MotionSequence seq = new MotionSequence("RpiTest", 1.0f, false);
         Keyframe kf1 = new Keyframe(0.0f);
         kf1.addJointAngle("joint_1", 10.0f);
         kf1.addJointAngle("joint_2", 20.0f);
@@ -376,12 +381,11 @@ public class SimToRealBridgeTest {
 
         String pyCode = TrajectoryExporter.toPythonScript(seq, testJoints, 20);
         assertNotNull(pyCode);
-        assertTrue(pyCode.contains("JOINTS_CONFIG = {"));
-        assertTrue(pyCode.contains("\"joint_1\": {\"pin\": 18, \"invert\": True, \"offset\": 5.0}"));
-        assertTrue(pyCode.contains("\"joint_2\": {\"pin\": 23, \"invert\": False, \"offset\": -5.0}"));
-        assertTrue(pyCode.contains("USE_PCA9685"));
-        assertTrue(pyCode.contains("def write_angle("));
-        assertTrue(pyCode.contains("time.sleep(sleep_time)"));
+        assertTrue(pyCode.contains("(18, 544, 2400),  # joint_1"));
+        assertTrue(pyCode.contains("(23, 544, 2400),  # joint_2"));
+        assertTrue(pyCode.contains("(0, (8500, 10500,))"));
+        assertTrue(pyCode.contains("(1000000, (6500, 12500,))"));
+        assertTrue(pyCode.contains("TRAJECTORY_LOOP = False"));
 
         String receiverScript = TrajectoryExporter.toRpiLiveReceiverScript();
         assertNotNull(receiverScript);

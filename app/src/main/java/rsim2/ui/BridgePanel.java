@@ -69,24 +69,24 @@ public class BridgePanel {
         MotionSequence sequence = motionPlayer == null ? null : motionPlayer.getSequence();
         boolean ready = sequence != null && !sequence.isIncomplete()
                 && sequence.getKeyframes().stream().anyMatch(frame -> !frame.getJointAnglesDegrees().isEmpty());
+        float speed = ready ? motionPlayer.getPlaybackSpeed() : 1.0f;
 
         ImGui.beginDisabled(!ready);
-        exportButton("Export Arduino Sketch (.ino)", "ino", () -> {
-            if (TrajectoryExporter.arduinoJointIds(sequence, joints).isEmpty()) {
-                throw new IllegalArgumentException("The motion has no movable joints for Arduino.");
-            }
-            return TrajectoryExporter.toArduinoSketch(sequence, joints, EXPORT_RATE_HZ);
-        });
+        exportButton("Export Arduino Sketch (.ino)", "ino",
+                () -> TrajectoryExporter.toArduinoSketch(sequence, joints, EXPORT_RATE_HZ, speed));
         exportButton("Export Arduino Header (.h)", "h",
-                () -> TrajectoryExporter.toArduinoHeader(sequence, joints, EXPORT_RATE_HZ));
+                () -> TrajectoryExporter.toArduinoHeader(sequence, joints, EXPORT_RATE_HZ, speed));
         exportButton("Export Raspberry Pi Script (.py)", "py",
-                () -> TrajectoryExporter.toPythonScript(sequence, joints, EXPORT_RATE_HZ));
+                () -> TrajectoryExporter.toPythonScript(sequence, joints, EXPORT_RATE_HZ, speed));
         ImGui.endDisabled();
 
         if (!ready) {
             ImGui.textWrapped("Load or finish recording a motion to export code.");
         } else if (!statusMessage.isEmpty()) {
             ImGui.textWrapped(statusMessage);
+        }
+        if (ready && !sequence.getEvents().isEmpty()) {
+            ImGui.textWrapped("Exports joint motion only. Scene object capture/release events are not exported.");
         }
     }
 

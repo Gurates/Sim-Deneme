@@ -41,6 +41,7 @@ public class ToolbarPanel {
     private CollisionPanel collisionPanel;
     private final McpPanel mcpPanel;
     private String motionStatus = "";
+    private final SceneObjectHierarchy sceneObjectHierarchy = new SceneObjectHierarchy();
 
     public ToolbarPanel(Engine engine, SceneNode rootNode, SelectionManager selectionManager,
             CommandHistory commandHistory, AIPanel aiPanel) {
@@ -246,14 +247,19 @@ public class ToolbarPanel {
 
         ImGui.sameLine(displayWidth - 450.0f);
 
-        if (ImGui.button("MCP", 100.0f, 24.0f)) {
+        if (ImGui.button("MCP", 72.0f, 24.0f)) {
             mcpPanel.toggleVisible();
         }
         if (ImGui.isItemHovered()) {
             ImGui.setTooltip("MCP connection setup and server test");
         }
 
-        ImGui.sameLine(displayWidth - 335.0f);
+        ImGui.sameLine();
+        if (ImGui.button("Scene Objects", 96.0f, 24.0f)) {
+            sceneObjectHierarchy.toggleVisible();
+        }
+
+        ImGui.sameLine();
 
         long now = System.currentTimeMillis();
         if (now - engine.getLastAutoSaveTime() < 2000) {
@@ -326,6 +332,7 @@ public class ToolbarPanel {
 
         ImGui.end();
         mcpPanel.render();
+        sceneObjectHierarchy.render(rootNode, selectionManager);
     }
 
     private void renderMotionFiles(MotionPlayer player) {
