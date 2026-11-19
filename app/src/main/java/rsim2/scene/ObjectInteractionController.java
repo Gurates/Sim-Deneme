@@ -1,6 +1,8 @@
 package rsim2.scene;
 
 import org.joml.Vector3f;
+import org.joml.Quaternionf;
+import com.google.gson.JsonObject;
 import org.joml.Matrix4f;
 import rsim2.collision.AABB;
 import rsim2.collision.EnvironmentMotionGuard;
@@ -27,6 +29,7 @@ public class ObjectInteractionController {
     private long approachStopGeneration;
     private long approachSeekGeneration;
     private boolean completeOnCapture;
+    private static final Runnable NO_DEADLINE = () -> {};
     private final EnvironmentMotionGuard motionGuard = new EnvironmentMotionGuard();
     private static final float SURFACE_CLEARANCE = 0.01f;
     private float remainingSeconds;
@@ -150,6 +153,43 @@ public class ObjectInteractionController {
 
 
     public String approach(SceneNode root, List<Joint> joints, String objectId, String toolId, Vector3f toolOffset) {
+        ApproachPlan plan = planApproach(root, joints, objectId, toolId, toolOffset, NO_DEADLINE);
+        if (plan.status.equals("no_plan_found")) throw new IllegalArgumentException(plan.detail);
+        if (plan.targets.length > 0) {
+            cancelPending();
+            for (int i = 0; i < plan.chain.size(); i++) {
+                Joint joint = plan.chain.get(i);
+                if (joint.getMotor() != null) joint.getMotor().setTargetAngleRadians(plan.targets[i]);
+                else joint.setAngle(plan.targets[i]);
+            }
+        }
+        return plan.detail;
+    }
+
+    private record ApproachPlan(String status, String detail, float initial, float remaining,
+                                List<Joint> chain, float[] targets) {}
+
+    public JsonObject previewApproach(SceneNode root, List<Joint> joints, String objectId,
+                                      String toolId, Vector3f offset) {
+        return previewApproach(root, joints, objectId, toolId, offset, NO_DEADLINE);
+    }
+
+    public JsonObject previewApproach(SceneNode root, List<Joint> joints, String objectId,
+                                      String toolId, Vector3f offset, Runnable checkActive) {
+        ApproachPlan plan = planApproach(root, joints, objectId, toolId, offset, checkActive);
+        JsonObject result = new JsonObject();
+        result.addProperty("object", objectId);
+        result.addProperty("tool", toolId);
+        result.addProperty("status", plan.status);
+        result.addProperty("initial_distance", plan.initial);
+        result.addProperty("planned_distance", plan.remaining);
+        result.addProperty("detail", plan.detail);
+        return result;
+    }
+
+    private ApproachPlan planApproach(SceneNode root, List<Joint> joints, String objectId,
+                                      String toolId, Vector3f toolOffset, Runnable checkActive) {
+        checkActive.run();
         SceneNode object = findNode(root, objectId);
         SceneNode tool = findNode(root, toolId);
         if (object == null || !objects(root).contains(object)) throw new IllegalArgumentException("Environment object not found: " + objectId);
@@ -159,14 +199,39 @@ public class ObjectInteractionController {
         if (joints != null) for (SceneNode node = tool; node != null; node = node.getParent()) {
             for (Joint joint : joints) if (joint.getChildNode() == node && joint.getType() == JointType.REVOLUTE) chain.add(joint);
         }
-        if (chain.isEmpty()) throw new IllegalArgumentException("Tool has no movable ancestor joints.");
         AABB bounds = objectBounds(object);
         Vector3f startPoint = toolPoint(tool, toolOffset);
         Vector3f nearest = new Vector3f(startPoint).max(bounds.getMin()).min(bounds.getMax());
         float initialDistance = startPoint.distance(nearest);
-        if (initialDistance <= SURFACE_CLEARANCE) return "Tool origin is already within the approach clearance; no motion or attachment requested.";
+        if (chain.isEmpty()) return new ApproachPlan("no_plan_found", "Tool has no movable ancestor joints.",
+                initialDistance, initialDistance, List.of(), new float[0]);
+        if (initialDistance <= SURFACE_CLEARANCE) {
+            String obstruction = motionGuard.collisionAtPose(root, joints);
+            return new ApproachPlan(obstruction == null ? "reachable" : "no_plan_found",
+                    obstruction == null ? "Tool is already within approach clearance." : obstruction,
+                    initialDistance, initialDistance, List.of(), new float[0]);
+        }
+
+        // The IK search samples live transforms on the simulation thread. Restore editor rotations
+        // as well as joint angles, including when a candidate or a collision check throws.
+        float[] original = angles(joints);
+        var rotations = joints.stream().map(j -> j.getChildNode() == null ? null
+                : new Quaternionf(j.getChildNode().getLocalRotation())).toList();
+        try {
+            return sampleApproach(chain, joints, root, tool, toolOffset, object, bounds, startPoint, nearest, initialDistance, checkActive);
+        } finally {
+            for (int i = 0; i < joints.size(); i++) {
+                Joint joint = joints.get(i);
+                joint.setAngle(original[i]);
+                if (rotations.get(i) != null) joint.getChildNode().getLocalRotation().set(rotations.get(i));
+            }
+        }
+    }
+
+    private ApproachPlan sampleApproach(List<Joint> chain, List<Joint> all, SceneNode root, SceneNode tool,
+                                        Vector3f toolOffset, SceneNode object, AABB bounds, Vector3f startPoint,
+                                        Vector3f nearest, float initialDistance, Runnable checkActive) {
         Vector3f destination = new Vector3f(nearest).add(new Vector3f(startPoint).sub(nearest).normalize().mul(SURFACE_CLEARANCE));
-        List<Joint> all = List.copyOf(joints);
         float[] start = angles(all);
         String[] obstruction = {null};
         BooleanSupplier valid = () -> {
@@ -181,7 +246,7 @@ public class ObjectInteractionController {
         for (int step = 16; step >= 1; step--) {
             float fraction = step / 16f;
             Vector3f target = new Vector3f(startPoint).lerp(destination, fraction);
-            float[] solution = solve(chain, tool, toolOffset, target, valid, true);
+            float[] solution = solve(chain, tool, toolOffset, target, valid, true, .005f, checkActive);
             if (solution == null) continue;
             for (int i = 0; i < chain.size(); i++) chain.get(i).setAngle(solution[i]);
             Vector3f reached = toolPoint(tool, toolOffset);
@@ -191,12 +256,12 @@ public class ObjectInteractionController {
                 best = solution; bestFraction = fraction; bestDistance = distance; break;
             }
         }
-        if (best == null) throw new IllegalArgumentException("No closer direct approach found. "
-                + (obstruction[0] == null ? "Joint limits or IK prevented progress." : "Blocked by: " + obstruction[0]));
+        if (best == null) return new ApproachPlan("no_plan_found", "No closer direct approach found. "
+                + (obstruction[0] == null ? "Joint limits or IK prevented progress." : "Blocked by: " + obstruction[0]), initialDistance, initialDistance, List.of(), new float[0]);
         float upper = Math.min(1, bestFraction + 1 / 16f);
         for (int refinement = 0; refinement < 5 && upper - bestFraction > 0.001f; refinement++) {
             float fraction = (bestFraction + upper) * 0.5f;
-            float[] solution = solve(chain, tool, toolOffset, new Vector3f(startPoint).lerp(destination, fraction), valid, true);
+            float[] solution = solve(chain, tool, toolOffset, new Vector3f(startPoint).lerp(destination, fraction), valid, true, .005f, checkActive);
             if (solution == null) { upper = fraction; continue; }
             for (int i = 0; i < chain.size(); i++) chain.get(i).setAngle(solution[i]);
             Vector3f reached = toolPoint(tool, toolOffset);
@@ -205,17 +270,13 @@ public class ObjectInteractionController {
             if (distance < bestDistance) { best = solution; bestFraction = fraction; bestDistance = distance; }
             else upper = fraction;
         }
-        cancelPending();
-        for (int i = 0; i < chain.size(); i++) {
-            Joint joint = chain.get(i);
-            if (joint.getMotor() != null) joint.getMotor().setTargetAngleRadians(best[i]);
-            else joint.setAngle(best[i]);
-        }
-        return String.format(Locale.ROOT,
+        String detail = String.format(Locale.ROOT,
                 "[Approach only] %s -> %s: TCP-to-object-bounds distance %.4f -> %.4f scene units; %.0f%% distance reduction. No grasp or attachment.%s",
-                toolId, objectId, initialDistance, bestDistance, (1 - bestDistance / initialDistance) * 100,
+                tool.getId(), object.getId(), initialDistance, bestDistance, (1 - bestDistance / initialDistance) * 100,
                 bestDistance > SURFACE_CLEARANCE + 0.006f ? " Remaining distance limited by collisions, reach or sampled solutions; this is not a global shortest-distance guarantee."
                         + (obstruction[0] == null ? "" : " Last rejected candidate: " + obstruction[0]) : "");
+        return new ApproachPlan(bestDistance <= SURFACE_CLEARANCE + .006f ? "reachable" : "partial",
+                detail, initialDistance, bestDistance, chain, best);
     }
 
     private static float[] angles(List<Joint> joints) {
@@ -224,6 +285,11 @@ public class ObjectInteractionController {
         return result;
     }
 
+
+    public static Vector3f workingOffset(SceneNode tool) {
+        Vector3f configured = tool.getTcpOffset();
+        return configured == null ? captureOffset(tool, new Vector3f()) : configured;
+    }
 
     public static Vector3f captureOffset(SceneNode tool, Vector3f requested) {
         if (requested == null || !requested.isFinite()) throw new IllegalArgumentException("Tool offset must be finite.");
@@ -243,6 +309,8 @@ public class ObjectInteractionController {
     }
 
     private static List<Vector3f> captureOffsets(SceneNode tool, Vector3f requested) {
+        Vector3f configured = tool.getTcpOffset();
+        if (configured != null && requested.lengthSquared() == 0) return List.of(configured);
         Vector3f tip = captureOffset(tool, requested);
         List<Vector3f> result = new ArrayList<>(); result.add(tip);
         if (requested.lengthSquared() != 0 || tool.getMeshes().isEmpty()) return result;
@@ -455,6 +523,11 @@ public class ObjectInteractionController {
     }
 
     private float[] solve(List<Joint> chain, SceneNode tool, Vector3f offset, Vector3f target, BooleanSupplier valid, boolean bestEffort, float tolerance) {
+        return solve(chain, tool, offset, target, valid, bestEffort, tolerance, NO_DEADLINE);
+    }
+
+    private float[] solve(List<Joint> chain, SceneNode tool, Vector3f offset, Vector3f target, BooleanSupplier valid,
+                          boolean bestEffort, float tolerance, Runnable checkActive) {
         float[] original = new float[chain.size()];
         for (int i = 0; i < chain.size(); i++) original[i] = chain.get(i).getCurrentAngleRadians();
         Random random = new Random(0);
@@ -468,6 +541,7 @@ public class ObjectInteractionController {
                 }
                 float step = 0.5f;
                 for (int pass = 0; pass < 300 && step >= 0.0005f; pass++) {
+                    checkActive.run();
                     float before = toolPoint(tool, offset).distanceSquared(target);
                     if (before <= tolerance * tolerance) {
                         if (!valid.getAsBoolean()) break;

@@ -15,6 +15,7 @@ import org.joml.Vector3f;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -30,6 +31,8 @@ public class AiActionExecutor {
         public List<String> appliedActions = new ArrayList<>();
         public MotionSequence generatedSequence = null;
         public boolean hasActions = false;
+        public boolean rejected;
+        public JsonArray previewResults;
         public boolean hasAnimation = false;
     }
 
@@ -54,24 +57,22 @@ public class AiActionExecutor {
 
         Matcher matcher = JSON_BLOCK_PATTERN.matcher(rawResponse);
         String jsonContent = null;
-        String matchedBlock = null;
 
         if (matcher.find()) {
-            matchedBlock = matcher.group(0);
             jsonContent = matcher.group(1);
             if (matcher.find()) {
+                result.rejected = true;
                 result.cleanedMessage = "[Command rejected] Submit one complete motion as a single JSON command.";
                 return result;
             }
         } else {
-            Matcher actionStart = Pattern.compile("\\{\\s*\"(?:pose|actions|animation|trajectory|keyframes|system|interaction)\"\\s*:").matcher(rawResponse);
+            Matcher actionStart = Pattern.compile("\\{\\s*\"(?:pose|actions|animation|trajectory|keyframes|system|interaction|preview_approach)\"\\s*:").matcher(rawResponse);
             int startIdx = actionStart.find() ? actionStart.start() : -1;
 
             if (startIdx != -1) {
                 int endIdx = rawResponse.lastIndexOf("}");
                 if (endIdx > startIdx) {
                     jsonContent = rawResponse.substring(startIdx, endIdx + 1);
-                    matchedBlock = jsonContent;
                 }
             }
         }
@@ -79,6 +80,34 @@ public class AiActionExecutor {
         if (jsonContent != null) {
             try {
                 JsonObject obj = JsonParser.parseString(jsonContent).getAsJsonObject();
+                if (obj.has("interaction") && obj.size() != 1)
+                    throw new IllegalArgumentException("Send object interaction as a standalone command.");
+                if (obj.has("preview_approach")) {
+                    result.previewResults = preview(obj, root, joints, interactions);
+                    result.cleanedMessage = "[Approach preview] " + result.previewResults;
+                    return result;
+                }
+                List<JointTarget> targets = List.of();
+                MotionSequence animation = null;
+                if (!obj.has("interaction")) {
+                    boolean validKeys = obj.has("keyframes")
+                            ? Set.of("keyframes", "name", "duration", "loop").containsAll(obj.keySet())
+                            : obj.size() == 1 && Set.of("pose", "actions", "animation", "trajectory", "system").containsAll(obj.keySet());
+                    if (!validKeys) throw new IllegalArgumentException("Provide one complete robot command.");
+                    if (!obj.has("system") && (joints == null || joints.isEmpty()))
+                        throw new IllegalArgumentException("No robot joints are loaded.");
+                    if (obj.has("pose") && !Set.of("home", "zero", "rest").contains(obj.get("pose").getAsString().trim().toLowerCase(java.util.Locale.ROOT)))
+                        throw new IllegalArgumentException("Unknown pose: " + obj.get("pose"));
+                    if (obj.has("actions")) targets = parseTargets(obj.getAsJsonArray("actions"), joints);
+                    if (obj.has("keyframes")) animation = parseAnimationSequence(obj, joints);
+                    if (obj.has("animation")) animation = parseAnimationSequence(obj.getAsJsonObject("animation"), joints);
+                    if (obj.has("trajectory")) animation = parseAnimationSequence(obj.getAsJsonObject("trajectory"), joints);
+                    if (obj.has("system")) {
+                        JsonElement stop = obj.getAsJsonObject("system").get("estop");
+                        if (stop == null || !stop.isJsonPrimitive() || !stop.getAsJsonPrimitive().isBoolean())
+                            throw new IllegalArgumentException("Expected a boolean estop.");
+                    }
+                }
                 float[] startAngles = joints == null ? null : rsim2.motion.JointMotion.angles(joints);
                 if (motionPlayer != null) motionPlayer.bindJoints(joints);
                 boolean interactionFailed = false;
@@ -86,7 +115,6 @@ public class AiActionExecutor {
                 if (obj.has("interaction")) {
                     try {
                         if (interactions == null || root == null) throw new IllegalArgumentException("Scene interaction is unavailable.");
-                        if (obj.size() != 1) throw new IllegalArgumentException("Send object interaction as a standalone command.");
                         if (rsim2.bridge.BridgeManager.getInstance().getSafetyFilter().isEmergencyStopActive()) {
                             throw new IllegalArgumentException("Emergency stop is active.");
                         }
@@ -96,12 +124,7 @@ public class AiActionExecutor {
                         String message;
                         if ("grasp_and_lift".equals(type) || "lift".equals(type)) {
                             if (task == null) throw new IllegalArgumentException("Grasp-and-lift task execution is unavailable.");
-                            Vector3f offset = new Vector3f();
-                            if (action.has("tool_offset")) {
-                                JsonArray a = action.getAsJsonArray("tool_offset");
-                                if (a.size() != 3) throw new IllegalArgumentException("tool_offset requires three coordinates.");
-                                offset.set(a.get(0).getAsFloat(), a.get(1).getAsFloat(), a.get(2).getAsFloat());
-                            }
+                            Vector3f offset = readOffset(action, new Vector3f());
                             float height = action.has("lift_distance") ? action.get("lift_distance").getAsFloat() : 0.05f;
                             String tool = action.has("tool") ? action.get("tool").getAsString() : null;
                             message = task.start(root, joints, interactions, motionPlayer, objectId, tool, offset, height,
@@ -113,12 +136,10 @@ public class AiActionExecutor {
                             if (motionPlayer != null && (motionPlayer.isPlaying() || motionPlayer.isReplayingEvents())) {
                                 throw new IllegalArgumentException("Finish or stop the current motion before planning a new approach or grasp.");
                             }
-                            Vector3f offset = new Vector3f();
-                            if (action.has("tool_offset")) {
-                                JsonArray a = action.getAsJsonArray("tool_offset");
-                                if (a.size() != 3) throw new IllegalArgumentException("tool_offset requires three coordinates.");
-                                offset.set(a.get(0).getAsFloat(), a.get(1).getAsFloat(), a.get(2).getAsFloat());
-                            }
+                            SceneNode toolNode = ObjectInteractionController.findNode(root, action.get("tool").getAsString());
+                            if (toolNode == null || !toolNode.isRobotPart()) throw new IllegalArgumentException("Invalid robot tool.");
+                            Vector3f offset = readOffset(action, "approach".equals(type)
+                                    ? ObjectInteractionController.workingOffset(toolNode) : new Vector3f());
                             message = "approach".equals(type)
                                     ? interactions.approach(root, joints, objectId, action.get("tool").getAsString(), offset)
                                     : interactions.grasp(root, joints, objectId, action.get("tool").getAsString(), offset);
@@ -137,9 +158,9 @@ public class AiActionExecutor {
                                 }
                             }
                         } else if ("release".equals(type)) {
+                            message = interactions.release(root, objectId);
                             if (task != null) task.cancel("release requested");
                             if (motionPlayer != null) motionPlayer.cancelReplay();
-                            message = interactions.release(root, objectId);
                         } else throw new IllegalArgumentException("Unknown interaction type: " + type);
                         result.appliedActions.add("[Interaction] " + message);
                     } catch (RuntimeException e) {
@@ -153,15 +174,9 @@ public class AiActionExecutor {
                     if (motionPlayer != null) motionPlayer.cancelReplay();
                 }
 
-                // Mixed commands are rejected above and must not execute their motion half.
-                if (obj.has("interaction") && obj.size() != 1) {
-                    result.cleanedMessage = "[Interaction failed] Send object interaction as a standalone command.";
-                    return result;
-                }
-
                 if (obj.has("pose") && joints != null) {
                     String pose = obj.get("pose").getAsString().trim().toLowerCase();
-                    if (motionPlayer != null && ("home".equals(pose) || "zero".equals(pose) || "rest".equals(pose))) motionPlayer.pause();
+                    if (motionPlayer != null) motionPlayer.pause();
                     executePose(pose, joints, result);
                 }
 
@@ -181,44 +196,25 @@ public class AiActionExecutor {
                     }
                 }
 
-                JsonObject animObj = null;
-                if (obj.has("animation") && obj.get("animation").isJsonObject()) {
-                    animObj = obj.getAsJsonObject("animation");
-                } else if (obj.has("trajectory") && obj.get("trajectory").isJsonObject()) {
-                    animObj = obj.getAsJsonObject("trajectory");
-                } else if (obj.has("keyframes") && obj.get("keyframes").isJsonArray()) {
-                    animObj = obj;
-                }
-
-                if (animObj != null) {
-                    MotionSequence seq = parseAnimationSequence(animObj, joints);
-                    if (seq != null && !seq.getKeyframes().isEmpty()) {
-                        result.generatedSequence = seq;
-                        result.hasAnimation = true;
-
-                        if (motionPlayer != null) {
-                            motionPlayer.loadSequence(seq);
-                            motionPlayer.play();
-                        }
-
-                        result.appliedActions.add(String.format("[Motion Loaded] \"%s\" (%.2fs, %d keyframes, Loop=%s)",
-                                seq.getName(), seq.getDurationSeconds(), seq.getKeyframes().size(), seq.isLoop() ? "Enabled" : "Disabled"));
-                        result.hasActions = true;
+                if (animation != null) {
+                    result.generatedSequence = animation;
+                    result.hasAnimation = true;
+                    if (motionPlayer != null) {
+                        motionPlayer.loadSequence(animation);
+                        motionPlayer.play();
                     }
+                    result.appliedActions.add("Loaded " + animation.getName());
                 }
-                if (obj.has("actions") && obj.get("actions").isJsonArray() && joints != null) {
-                    if (motionPlayer != null && animObj == null && !obj.getAsJsonArray("actions").isEmpty()) motionPlayer.pause();
-                    JsonArray actions = obj.getAsJsonArray("actions");
-                    for (JsonElement elem : actions) {
-                        if (elem.isJsonObject()) {
-                            JsonObject act = elem.getAsJsonObject();
-                            executeSingleAction(act, joints, result);
-                        }
+                if (!targets.isEmpty()) {
+                    if (motionPlayer != null) motionPlayer.pause();
+                    for (JointTarget target : targets) {
+                        applyJointTarget(target.joint, (float) Math.toRadians(target.degrees),
+                                target.degrees, target.speed, target.acceleration, result);
                     }
                 }
 
                 if (!result.appliedActions.isEmpty()) {
-                    if (!interactionFailed && !obj.has("interaction") && animObj == null && joints != null
+                    if (!interactionFailed && !obj.has("interaction") && animation == null && joints != null
                             && motionPlayer != null && (obj.has("pose") || obj.has("actions"))) {
                         MotionSequence direct = rsim2.motion.JointMotion.fromTargets("AI Joint Motion", joints, startAngles);
                         if (direct != null) {
@@ -229,12 +225,11 @@ public class AiActionExecutor {
                         }
                     }
                     result.hasActions = !interactionFailed;
-                    String clean = (interactionFailed || obj.has("interaction")) ? "" : (matchedBlock != null) ? rawResponse.replace(matchedBlock, "").trim() : rawResponse;
-                    StringBuilder sb = new StringBuilder(clean);
-                    if (sb.length() > 0) {
-                        sb.append("\n\n");
-                    }
-                    sb.append(interactionFailed ? "[Command rejected — robot did not move]:\n" : obj.has("interaction") ? "[Command accepted]:\n" : "[Applied Commands]:\n");
+                    result.rejected = interactionFailed;
+                    StringBuilder sb = new StringBuilder();
+                    if (interactionFailed) sb.append("[Command rejected]\n");
+                    else if (result.generatedSequence != null && motionPlayer != null) sb.append("[Motion started]\n");
+                    else sb.append("[Command applied]\n");
                     for (String msg : result.appliedActions) {
                         sb.append("  • ").append(msg).append("\n");
                     }
@@ -243,14 +238,31 @@ public class AiActionExecutor {
                 }
 
             } catch (Exception e) {
-                System.err.println("Failed to parse AI action/animation JSON: " + e.getMessage());
-                result.cleanedMessage = rawResponse + "\n\n[Command error] AI command could not be processed: " + e.getMessage();
+                result.rejected = true;
+                result.cleanedMessage = "[Command rejected] " + e.getMessage();
                 return result;
             }
         }
 
         result.cleanedMessage = rawResponse + "\n\n[No action applied] No executable robot command was found in this response.";
         return result;
+    }
+
+    private static JsonArray preview(JsonObject obj, SceneNode root, List<Joint> joints, ObjectInteractionController interactions) {
+        if (obj.size() != 1 || root == null || interactions == null)
+            throw new IllegalArgumentException("Preview requires a scene and a standalone command.");
+        JsonObject query = obj.getAsJsonObject("preview_approach");
+        SceneNode tool = ObjectInteractionController.findNode(root, query.get("tool").getAsString());
+        if (tool == null || !tool.isRobotPart() || tool == root) throw new IllegalArgumentException("Unknown robot tool.");
+        JsonArray objects = query.getAsJsonArray("objects");
+        if (objects == null || objects.isEmpty() || objects.size() > 8)
+            throw new IllegalArgumentException("Preview between one and eight object IDs at a time.");
+        JsonArray observations = new JsonArray();
+        Vector3f offset = readOffset(query, ObjectInteractionController.workingOffset(tool));
+        for (JsonElement id : objects) {
+            observations.add(interactions.previewApproach(root, joints, id.getAsString(), tool.getId(), offset));
+        }
+        return observations;
     }
 
     private static void executePose(String pose, List<Joint> joints, ExecutionResult result) {
@@ -264,7 +276,7 @@ public class AiActionExecutor {
                     j.setAngle(clampedRad);
                 }
             }
-            result.appliedActions.add("[Pose] All joints reset to HOME (0.0°) position.");
+            result.appliedActions.add("[Pose] HOME joint targets set.");
             result.hasActions = true;
         } else if ("rest".equals(pose)) {
             for (Joint j : joints) {
@@ -275,7 +287,7 @@ public class AiActionExecutor {
                     j.setAngle(targetRad);
                 }
             }
-            result.appliedActions.add("[Pose] Robot moved to safe REST configuration.");
+            result.appliedActions.add("[Pose] REST joint targets set.");
             result.hasActions = true;
         } else {
             result.appliedActions.add("[Pose] Unknown pose requested: " + pose);
@@ -287,96 +299,79 @@ public class AiActionExecutor {
         float duration = animObj.has("duration") ? animObj.get("duration").getAsFloat() : 1.0f;
         boolean loop = animObj.has("loop") && animObj.get("loop").getAsBoolean();
 
+        if (!Float.isFinite(duration) || duration <= 0) throw new IllegalArgumentException("Invalid animation duration.");
         MotionSequence sequence = new MotionSequence(name, duration, loop);
-
-        if (animObj.has("keyframes") && animObj.get("keyframes").isJsonArray()) {
-            JsonArray kfArray = animObj.getAsJsonArray("keyframes");
-            for (JsonElement el : kfArray) {
-                if (el.isJsonObject()) {
-                    JsonObject kfObj = el.getAsJsonObject();
-                    float time = kfObj.has("time") ? kfObj.get("time").getAsFloat() : (kfObj.has("t") ? kfObj.get("t").getAsFloat() : 0.0f);
-
-                    Keyframe keyframe = new Keyframe(time);
-
-                    JsonObject jointsMap = null;
-                    if (kfObj.has("joints") && kfObj.get("joints").isJsonObject()) {
-                        jointsMap = kfObj.getAsJsonObject("joints");
-                    } else if (kfObj.has("angles") && kfObj.get("angles").isJsonObject()) {
-                        jointsMap = kfObj.getAsJsonObject("angles");
-                    }
-
-                    if (jointsMap != null) {
-                        for (Map.Entry<String, JsonElement> entry : jointsMap.entrySet()) {
-                            try {
-                                String jointId = entry.getKey();
-                                float angleDeg = entry.getValue().getAsFloat();
-
-                                if ("ALL".equalsIgnoreCase(jointId) && joints != null) {
-                                    for (Joint j : joints) {
-                                        keyframe.addJointAngle(j.getId(), angleDeg);
-                                    }
-                                } else {
-                                    keyframe.addJointAngle(jointId, angleDeg);
-                                }
-                            } catch (Exception ignored) {
-                            }
-                        }
-                    }
-
-                    sequence.addKeyframe(keyframe);
-                }
+        JsonArray frames = animObj.getAsJsonArray("keyframes");
+        if (frames == null || frames.isEmpty()) throw new IllegalArgumentException("Animation needs keyframes.");
+        for (JsonElement el : frames) {
+            JsonObject frame = el.getAsJsonObject();
+            JsonElement timestamp = first(frame, "time", "t");
+            float time = timestamp == null ? 0 : finite(timestamp, "keyframe time");
+            if (time < 0 || time > duration) throw new IllegalArgumentException("Keyframe outside animation duration.");
+            Keyframe key = new Keyframe(time);
+            JsonElement values = first(frame, "joints", "angles");
+            if (values == null || values.getAsJsonObject().isEmpty()) throw new IllegalArgumentException("Empty joint keyframe.");
+            for (var entry : values.getAsJsonObject().entrySet()) {
+                float degrees = finite(entry.getValue(), "joint angle");
+                for (Joint joint : resolveJoints(joints, entry.getKey()))
+                    key.addJointAngle(joint.getId(), degrees);
             }
+            sequence.addKeyframe(key);
         }
-
         sequence.sortKeyframes();
         return sequence;
     }
 
-    private static void executeSingleAction(JsonObject act, List<Joint> joints, ExecutionResult result) {
-        String jointId = null;
-        if (act.has("joint")) jointId = act.get("joint").getAsString();
-        else if (act.has("joint_id")) jointId = act.get("joint_id").getAsString();
-        else if (act.has("id")) jointId = act.get("id").getAsString();
+    private static Vector3f readOffset(JsonObject action, Vector3f fallback) {
+        if (!action.has("tool_offset")) return fallback;
+        JsonArray offset = action.getAsJsonArray("tool_offset");
+        if (offset.size() != 3) throw new IllegalArgumentException("tool_offset requires three coordinates.");
+        return new Vector3f(finite(offset.get(0), "offset"), finite(offset.get(1), "offset"), finite(offset.get(2), "offset"));
+    }
 
-        if (jointId == null) {
-            return;
-        }
+    private record JointTarget(Joint joint, float degrees, Float speed, Float acceleration) {}
 
-        Double targetDeg = null;
-        if (act.has("target_deg")) targetDeg = act.get("target_deg").getAsDouble();
-        else if (act.has("angle_deg")) targetDeg = act.get("angle_deg").getAsDouble();
-        else if (act.has("angle")) targetDeg = act.get("angle").getAsDouble();
-        else if (act.has("target")) targetDeg = act.get("target").getAsDouble();
-        else if (act.has("value")) targetDeg = act.get("value").getAsDouble();
-
-        if (targetDeg == null) {
-            return;
-        }
-
-        float deg = targetDeg.floatValue();
-        float targetRad = (float) Math.toRadians(deg);
-
-        Float speedRatio = null;
-        if (act.has("speed_ratio")) speedRatio = act.get("speed_ratio").getAsFloat();
-        else if (act.has("speed_pct")) speedRatio = act.get("speed_pct").getAsFloat() / 100.0f;
-        else if (act.has("speed") && act.get("speed").getAsFloat() <= 1.0f) speedRatio = act.get("speed").getAsFloat();
-
-        Float acceleration = null;
-        if (act.has("acceleration")) acceleration = act.get("acceleration").getAsFloat();
-        else if (act.has("accel")) acceleration = act.get("accel").getAsFloat();
-
-        if ("ALL".equalsIgnoreCase(jointId) || "*".equals(jointId)) {
-            for (Joint j : joints) {
-                applyJointTarget(j, targetRad, deg, speedRatio, acceleration, result);
+    private static List<JointTarget> parseTargets(JsonArray actions, List<Joint> joints) {
+        if (actions.isEmpty()) throw new IllegalArgumentException("Empty joint command.");
+        List<JointTarget> targets = new ArrayList<>();
+        for (JsonElement element : actions) {
+            JsonObject action = element.getAsJsonObject();
+            JsonElement id = first(action, "joint", "joint_id", "id");
+            if (id == null) throw new IllegalArgumentException("Missing joint ID.");
+            float degrees = finite(first(action, "target_deg", "angle_deg", "angle", "target", "value"), "target angle");
+            JsonElement speed = first(action, "speed_ratio", "speed_pct", "speed");
+            Float ratio = speed == null ? null : finite(speed, "speed");
+            if (ratio != null) {
+                if (!action.has("speed_ratio") && action.has("speed_pct")) ratio /= 100;
+                if (ratio <= 0 || ratio > 1) throw new IllegalArgumentException("Speed ratio must be in (0, 1].");
             }
-        } else {
-            Joint targetJoint = findJoint(joints, jointId);
-            if (targetJoint != null) {
-                applyJointTarget(targetJoint, targetRad, deg, speedRatio, acceleration, result);
-            } else {
-                result.appliedActions.add("[Warning] Joint not found: " + jointId);
-            }
+            JsonElement accel = first(action, "acceleration", "accel");
+            Float acceleration = accel == null ? null : finite(accel, "acceleration");
+            if (acceleration != null && acceleration <= 0) throw new IllegalArgumentException("Acceleration must be positive.");
+            for (Joint joint : resolveJoints(joints, id.getAsString()))
+                targets.add(new JointTarget(joint, degrees, ratio, acceleration));
         }
+        return targets;
+    }
+
+    private static List<Joint> resolveJoints(List<Joint> joints, String id) {
+        boolean all = "ALL".equalsIgnoreCase(id) || "*".equals(id);
+        var matches = joints.stream().filter(j -> j.getType() != rsim2.scene.JointType.FIXED
+                && (all || j.getId().equalsIgnoreCase(id))).toList();
+        if (matches.isEmpty() || (!all && matches.size() != 1))
+            throw new IllegalArgumentException("Unknown, fixed or ambiguous joint: " + id);
+        return matches;
+    }
+
+    private static JsonElement first(JsonObject object, String... aliases) {
+        for (String name : aliases) if (object.has(name)) return object.get(name);
+        return null;
+    }
+
+    private static float finite(JsonElement value, String field) {
+        if (value == null || !value.isJsonPrimitive() || !value.getAsJsonPrimitive().isNumber()
+                || !Float.isFinite(value.getAsFloat())) throw new IllegalArgumentException("Invalid " + field);
+        return value.getAsFloat();
     }
 
     private static void applyJointTarget(Joint j, float targetRad, float deg, Float speedRatio, Float acceleration, ExecutionResult result) {
@@ -405,18 +400,4 @@ public class AiActionExecutor {
         result.appliedActions.add(sb.toString());
     }
 
-    private static Joint findJoint(List<Joint> joints, String jointId) {
-        for (Joint j : joints) {
-            if (j.getId().equalsIgnoreCase(jointId)) {
-                return j;
-            }
-        }
-        for (Joint j : joints) {
-            if (j.getId().toLowerCase().contains(jointId.toLowerCase()) ||
-                jointId.toLowerCase().contains(j.getId().toLowerCase())) {
-                return j;
-            }
-        }
-        return null;
-    }
 }

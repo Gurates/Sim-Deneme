@@ -3,6 +3,7 @@ package rsim2.mcp;
 import com.google.gson.*;
 import rsim2.bridge.BridgeManager;
 import rsim2.collision.CollisionResult;
+import rsim2.collision.CollisionFilter;
 import rsim2.motion.*;
 import rsim2.scene.*;
 import org.joml.Vector3f;
@@ -38,12 +39,18 @@ public final class McpRobotController {
 
     public JsonObject execute(String tool, JsonObject args, SceneNode root, List<Joint> joints,
                               MotionPlayer player, CollisionResult collisions, boolean aiBusy, Runnable takeControl) {
+        return execute(tool, args, root, joints, player, collisions, null, null, aiBusy, takeControl);
+    }
+
+    public JsonObject execute(String tool, JsonObject args, SceneNode root, List<Joint> joints,
+                              MotionPlayer player, CollisionResult collisions, CollisionFilter filter,
+                              SceneNode selected, boolean aiBusy, Runnable takeControl) {
         if (root != interactionRoot) {
             interactions = new ObjectInteractionController();
             interactionRoot = root;
         }
         if (!Set.of("move_joints", "pick_object_top_down", "release_object", "execute_trajectory",
-                "move_tcp", "capture_object", "get_geometry").contains(tool) && !args.isEmpty())
+                "move_tcp", "capture_object", "get_geometry", "preview_approach", "get_grasp_state").contains(tool) && !args.isEmpty())
             throw new IllegalArgumentException("This tool accepts no arguments.");
         return switch (tool) {
             case "get_connection_status" -> {
@@ -55,14 +62,25 @@ public final class McpRobotController {
                 yield value;
             }
             case "get_robot_state" -> robotState(joints, player);
-            case "get_scene" -> scene(root);
+            case "get_scene" -> scene(root, joints, selected, filter, collisions);
+            case "preview_approach" -> {
+                if (!Set.of("object", "tool", "tool_offset").containsAll(args.keySet()))
+                    throw new IllegalArgumentException("Unexpected preview argument.");
+                SceneNode tip = tool(root, args);
+                Vector3f offset = args.has("tool_offset") ? vector(args.get("tool_offset"))
+                        : ObjectInteractionController.workingOffset(tip);
+                yield interactions.previewApproach(root, joints, string(args, "object"), tip.getId(), offset, McpBridge::ensureRequestActive);
+            }
             case "get_motion" -> McpRobotSnapshot.motion(player);
             case "get_geometry" -> McpRobotSnapshot.geometry(root, args);
+            case "get_grasp_state" -> McpGraspState.read(args, root);
             case "get_robot_snapshot" -> {
                 JsonObject snapshot = robotState(joints, player);
-                snapshot.add("scene", scene(root));
+                snapshot.add("scene", scene(root, joints, selected, filter, collisions));
                 snapshot.add("motion", McpRobotSnapshot.motion(player));
-                snapshot.add("collisions", McpRobotSnapshot.collisions(collisions));
+                var contacts = McpRobotSnapshot.collisions(collisions);
+                contacts.addProperty("status", SceneObservation.collisionStatus(filter, collisions));
+                snapshot.add("collisions", contacts);
                 yield snapshot;
             }
             case "get_task_status" -> taskStatus();
@@ -490,14 +508,16 @@ public final class McpRobotController {
         return value;
     }
 
-    private JsonObject scene(SceneNode root) {
+    private JsonObject scene(SceneNode root, List<Joint> joints, SceneNode selected, CollisionFilter filter, CollisionResult collisions) {
         JsonObject value = new JsonObject();
         JsonArray nodes = new JsonArray();
         if (root != null) visit(root, nodes);
         value.add("nodes", nodes);
-        value.addProperty("position_units", "scene units");
-        value.add("world_up", coordinates(new Vector3f(0, 1, 0)));
+        var summary = SceneObservation.describe(root, joints, selected, interactions, filter, collisions);
+        value.add("position_units", summary.get("position_units"));
+        value.add("world_up", summary.get("world_up"));
         value.addProperty("matrix_order", "column_major");
+        value.add("summary", summary);
         return value;
     }
 
@@ -506,9 +526,7 @@ public final class McpRobotController {
         item.addProperty("id", node.getId());
         item.addProperty("parent", node.getParent() == null ? null : node.getParent().getId());
         Vector3f position = node.getWorldTransform().getTranslation(new Vector3f());
-        JsonArray xyz = new JsonArray();
-        xyz.add(position.x); xyz.add(position.y); xyz.add(position.z);
-        item.add("world_position", xyz);
+        item.add("world_position", coordinates(position));
         item.addProperty("robot_part", node.isRobotPart());
         item.add("local_position", coordinates(node.getLocalPosition()));
         item.add("local_scale", coordinates(node.getLocalScale()));
@@ -531,8 +549,6 @@ public final class McpRobotController {
     }
 
     static JsonArray coordinates(Vector3f point) {
-        JsonArray value = new JsonArray();
-        value.add(point.x); value.add(point.y); value.add(point.z);
-        return value;
+        return SceneObservation.xyz(point);
     }
 }

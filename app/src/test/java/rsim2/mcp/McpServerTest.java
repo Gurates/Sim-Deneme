@@ -21,12 +21,41 @@ class McpServerTest {
         assertEquals("2025-06-18", init.get("protocolVersion").getAsString());
         var listed = JsonParser.parseString(lines[1]).getAsJsonObject().getAsJsonObject("result").getAsJsonArray("tools");
         assertEquals("get_connection_status", listed.get(0).getAsJsonObject().get("name").getAsString());
+        var preview = java.util.stream.StreamSupport.stream(listed.spliterator(), false)
+                .map(element -> element.getAsJsonObject())
+                .filter(tool -> tool.get("name").getAsString().equals("preview_approach"))
+                .findFirst().orElseThrow();
+        assertTrue(preview.getAsJsonObject("annotations").get("readOnlyHint").getAsBoolean());
+        assertEquals(2, preview.getAsJsonObject("inputSchema").getAsJsonArray("required").size());
         var reply = JsonParser.parseString(lines[2]).getAsJsonObject();
         assertEquals("status", reply.get("id").getAsString());
         var status = JsonParser.parseString(reply.getAsJsonObject("result").getAsJsonArray("content")
                 .get(0).getAsJsonObject().get("text").getAsString()).getAsJsonObject();
         assertFalse(status.get("simulatorConnected").getAsBoolean());
         assertFalse(status.get("robotControlAvailable").getAsBoolean());
+    }
+
+    @Test void previewReturnsTheSameStructuredAndTextResultOverJsonRpc() {
+        var root = new rsim2.scene.SceneNode("world");
+        var tool = new rsim2.scene.SceneNode("arm");
+        var box = new rsim2.scene.SceneNode("box");
+        box.setRobotPart(false);
+        box.getLocalPosition().x = 1;
+        root.addChild(tool);
+        root.addChild(box);
+        var controller = new McpRobotController();
+        var player = new rsim2.motion.MotionPlayer();
+        var server = new McpServer((name, args) -> controller.execute(name, args, root,
+                java.util.List.of(), player, false, () -> fail("Preview took control")));
+        var reply = server.handle("""
+                {"jsonrpc":"2.0","id":7,"method":"tools/call","params":{
+                  "name":"preview_approach","arguments":{"tool":"arm","object":"box"}}}
+                """).getAsJsonObject("result");
+        assertFalse(reply.get("isError").getAsBoolean());
+        var result = reply.getAsJsonObject("structuredContent");
+        assertEquals("no_plan_found", result.get("status").getAsString());
+        assertEquals(result, JsonParser.parseString(reply.getAsJsonArray("content").get(0).getAsJsonObject().get("text").getAsString()));
+        assertFalse(player.hasSequence());
     }
 
     @Test void rejectsInvalidMessagesAndRecovers() {

@@ -10,6 +10,26 @@ import java.util.List;
 
 public class SceneNode {
     private String id;
+    private Vector3f tcpOffset;
+    // Meaningful on the scene root. Older projects can have an unspecified scale.
+    private Float metersPerSceneUnit;
+
+    public Float getMetersPerSceneUnit() { return metersPerSceneUnit; }
+
+    public void setMetersPerSceneUnit(Float meters) {
+        if (meters != null && (!Float.isFinite(meters) || meters <= 0))
+            throw new IllegalArgumentException("Scene scale must be finite and positive.");
+        metersPerSceneUnit = meters;
+    }
+
+    public Vector3f getTcpOffset() {
+        return tcpOffset == null ? null : new Vector3f(tcpOffset);
+    }
+
+    public void setTcpOffset(Vector3f offset) {
+        if (offset != null && !offset.isFinite()) throw new IllegalArgumentException("TCP offset must be finite.");
+        tcpOffset = offset == null ? null : new Vector3f(offset);
+    }
     private final List<Mesh> meshes = new ArrayList<>();
     private String sourceMeshPath;
     private final Vector3f localPosition;

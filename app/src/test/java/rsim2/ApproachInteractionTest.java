@@ -98,6 +98,64 @@ class ApproachInteractionTest {
         assertTrue(context.contains("Simply bring the robotic arm closer"));
     }
 
+    @Test void interruptedPreviewRestoresEditedTransformAndMotor() {
+        pivot.getLocalRotation().rotateX(.17f);
+        var rotation = new org.joml.Quaternionf(pivot.getLocalRotation());
+        joint.getMotor().setTargetAngleRadians(.45f);
+        int[] checks = {0};
+        assertThrows(IllegalArgumentException.class, () -> interactions.previewApproach(root, List.of(joint),
+                "box", "tool", new Vector3f(), () -> {
+                    if (++checks[0] == 3) throw new IllegalArgumentException("expired");
+                }));
+        assertEquals(0, joint.getCurrentAngleRadians());
+        assertEquals(rotation, pivot.getLocalRotation());
+        assertEquals(.45f, joint.getMotor().getTargetAngleRadians());
+        assertFalse(interactions.hasPendingGrasp());
+    }
+
+    @Test void comparesCandidateApproachesWithoutChangingPlaybackOrTargets() {
+        pivot.getLocalPosition().y = 3;
+        tool.setTcpOffset(new Vector3f());
+        tool.setCollisionShape(new BoxShape(-.003f,-.003f,-.003f,.003f,.003f,.003f));
+        box.getLocalPosition().set(0,4,0);
+        SceneNode far = new SceneNode("far");
+        far.setRobotPart(false);
+        far.getLocalPosition().set(-.643f,2.234f,0);
+        far.setCollisionShape(new BoxShape(-.1f,-.1f,-.1f,.1f,.1f,.1f));
+        root.addChild(far);
+        SceneNode wall = new SceneNode("wall");
+        wall.setRobotPart(false);
+        wall.getLocalPosition().set(.7071f,3.7071f,0);
+        wall.setCollisionShape(new BoxShape(-.04f,-.04f,-.04f,.04f,.04f,.04f));
+        root.addChild(wall);
+        var joints = List.of(joint);
+        var mcp = new rsim2.mcp.McpRobotController();
+        mcp.useInteractions(root, interactions);
+        var command = com.google.gson.JsonParser.parseString("{\"targets_degrees\":{\"joint\":15}}").getAsJsonObject();
+        var started = mcp.execute("move_joints", command, root, joints, player, false, () -> {});
+        var sequence = player.getSequence();
+        float target = joint.getMotor().getTargetAngleRadians();
+        var query = com.google.gson.JsonParser.parseString("{\"object\":\"box\",\"tool\":\"tool\"}").getAsJsonObject();
+        var near = mcp.execute("preview_approach", query, root, joints, player, true, () -> fail("Read-only query took control"));
+        query.addProperty("object", "far");
+        var other = mcp.execute("preview_approach", query, root, joints, player, true, () -> fail("Read-only query took control"));
+        assertTrue(near.get("initial_distance").getAsFloat() < other.get("initial_distance").getAsFloat());
+        assertEquals("partial", near.get("status").getAsString(), near.toString());
+        assertEquals("reachable", other.get("status").getAsString(), other.toString());
+        var response = AiActionExecutor.processAndExecute("""
+                {"preview_approach":{"tool":"tool","objects":["box","far"]}}
+                """, joints, player, root, interactions);
+        assertFalse(response.hasActions);
+        assertEquals(near, response.previewResults.get(0));
+        assertEquals(other, response.previewResults.get(1));
+        assertEquals(0, joint.getCurrentAngleRadians());
+        assertEquals(target, joint.getMotor().getTargetAngleRadians());
+        assertTrue(player.isPlaying());
+        assertSame(sequence, player.getSequence());
+        assertEquals(started, mcp.execute("get_task_status", new com.google.gson.JsonObject(),
+                root, joints, player, false, () -> fail("Status took control")));
+    }
+
     @Test void samplingResolutionFollowsSceneScale() {
         EnvironmentMotionGuard guard = new EnvironmentMotionGuard();
         assertNull(guard.validateStep(root,List.of(joint),new float[]{0},new float[]{(float)Math.PI/2}));

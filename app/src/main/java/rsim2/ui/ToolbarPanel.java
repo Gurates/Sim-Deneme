@@ -215,14 +215,18 @@ public class ToolbarPanel {
         boolean interactionMotion = hasSequence && (motionPlayer.getSequence().isIncomplete()
                 || !motionPlayer.getSequence().getEvents().isEmpty());
         ImGui.beginDisabled(interactionMotion || engine.hasActiveMotionTask());
-        if (ImGui.checkbox("Loop", loopBool)) {
+        if (ImGui.checkbox("##loopPlayback", loopBool)) {
             if (motionPlayer != null) {
                 motionPlayer.setLooping(loopBool.get());
+
+                if (ImGui.isItemHovered()) {
+                ImGui.setTooltip("Loop motion playback");
+            }
             }
         }
         ImGui.endDisabled();
 
-        ImGui.sameLine(displayWidth - 560.0f);
+        ImGui.sameLine(displayWidth - 620.0f);
         renderMotionFiles(motionPlayer);
 
 
@@ -245,7 +249,7 @@ public class ToolbarPanel {
         }
 
 
-        ImGui.sameLine(displayWidth - 450.0f);
+        ImGui.sameLine(displayWidth - 400.0f);
 
         if (ImGui.button("MCP", 72.0f, 24.0f)) {
             mcpPanel.toggleVisible();

@@ -18,6 +18,7 @@ import rsim2.collision.CollisionWorld;
 import rsim2.core.Engine;
 import rsim2.editor.SelectionManager;
 import rsim2.motion.MotionPlayer;
+import rsim2.motion.MotionSequence;
 import rsim2.scene.Joint;
 import rsim2.scene.SceneNode;
 import rsim2.scene.ObjectInteractionController;
@@ -45,6 +46,9 @@ public class AIPanel {
     public ObjectInteractionController getObjectInteractions() { return interactions; }
     private final GraspLiftCoordinator graspLift = new GraspLiftCoordinator();
     private long requestGeneration;
+    private MotionSequence trackedMotion;
+    private long trackedStop;
+    private long trackedSeek;
     private final ConcurrentLinkedQueue<Runnable> pendingResponses = new ConcurrentLinkedQueue<>();
 
     private final AiConfig config;
@@ -143,6 +147,7 @@ public class AIPanel {
 
     public void setRootNode(SceneNode rootNode) {
         if (this.rootNode != rootNode) {
+            trackedMotion = null;
             graspLift.cancel("scene changed");
             interactions = new ObjectInteractionController();
             requestGeneration++;
@@ -152,6 +157,15 @@ public class AIPanel {
 
 
     public void update(float deltaTime) {
+        if (trackedMotion != null) {
+            if (motionPlayer.getSequence() != trackedMotion || trackedStop != motionPlayer.getStopGeneration()
+                    || trackedSeek != motionPlayer.getSeekGeneration()) {
+                trackedMotion = null;
+            } else if (!motionPlayer.isPlaying() && motionPlayer.getCurrentTime() >= trackedMotion.getDurationSeconds()) {
+                reportMotionStatus("[Motion completed] " + trackedMotion.getName(), false);
+                trackedMotion = null;
+            }
+        }
         Runnable response;
         while ((response = pendingResponses.poll()) != null) {
             try {
@@ -178,6 +192,7 @@ public class AIPanel {
     }
 
     public void onMotionBlocked(String reason) {
+        trackedMotion = null;
         requestGeneration++;
         graspLift.cancel("motion blocked: " + reason);
         interactions.cancelPending();
@@ -194,6 +209,7 @@ public class AIPanel {
 
 
     public void onExternalControl() {
+        trackedMotion = null;
         requestGeneration++;
         pendingResponses.clear();
         isLoading = false;
@@ -468,10 +484,17 @@ public class AIPanel {
     }
 
     private void requestResponse(String userPrompt, boolean commandRetry) {
+        requestResponse(userPrompt, commandRetry, null);
+    }
+
+    private void requestResponse(String userPrompt, boolean commandRetry, String preview) {
 
         String systemContext;
         try {
             systemContext = buildRobotSystemContext();
+            if (preview != null) systemContext += "\nLocal direct-approach preview for this request: " + preview
+                    + "\nUse these observations to answer the original request. Only move if the user requested execution. "
+                    + "For the nearest reachable candidate, compare initial distances among reachable results. Do not request another preview.";
         } catch (RuntimeException error) {
             reportAiError("Could not read scene for AI request", error);
             return;
@@ -490,7 +513,16 @@ public class AIPanel {
                     } else {
                         AiActionExecutor.ExecutionResult execRes = AiActionExecutor.processAndExecute(
                                 responseText, joints, motionPlayer, rootNode, interactions, graspLift);
-                        if (!execRes.hasActions && execRes.appliedActions.isEmpty() && !commandRetry
+                        if (execRes.previewResults != null) {
+                            if (preview == null) {
+                                requestResponse(userPrompt, commandRetry, execRes.previewResults.toString());
+                                return;
+                            }
+                            reportMotionStatus(execRes.cleanedMessage, false);
+                            isLoading = false;
+                            return;
+                        }
+                        if (!execRes.rejected && !execRes.hasActions && execRes.appliedActions.isEmpty() && !commandRetry && preview == null
                                 && AiActionExecutor.isMotionRequest(userPrompt)) {
                             chatHistory.add(new ChatMessage("System", "AI did not provide an executable command. Requesting the command; robot has not moved.", false));
                             requestResponse(userPrompt + "\n\nThe previous reply did not supply an executable command. "
@@ -501,7 +533,12 @@ public class AIPanel {
                                     + "Do not claim movement has started. If the target/tool is ambiguous or the request is informational, explain or ask for clarification instead of guessing.", true);
                             return;
                         }
-                        chatHistory.add(new ChatMessage("AI", execRes.cleanedMessage, false));
+                        if (execRes.generatedSequence != null && !execRes.generatedSequence.isIncomplete()) {
+                            trackedMotion = execRes.generatedSequence;
+                            trackedStop = motionPlayer.getStopGeneration();
+                            trackedSeek = motionPlayer.getSeekGeneration();
+                        }
+                        chatHistory.add(new ChatMessage("AI", execRes.cleanedMessage, execRes.rejected));
                         if (execRes.hasActions && engine != null) engine.autoSaveProject();
                     }
                     isLoading = false;
@@ -519,7 +556,8 @@ public class AIPanel {
     }
 
     private String buildRobotSystemContext() {
-        StringBuilder context = new StringBuilder(RobotContextBuilder.buildContext(rootNode, joints, collisionWorld, motionPlayer, interactions));
+        StringBuilder context = new StringBuilder(RobotContextBuilder.buildContext(rootNode, joints, collisionWorld, motionPlayer, interactions,
+                selectionManager == null ? null : selectionManager.getSelected()));
         context.append("\nSimulator task: ").append(graspLift.state()).append("\n");
         context.append("Recent conversation (historical statements may be stale; current scene state above is authoritative):\n");
         synchronized (chatHistory) {

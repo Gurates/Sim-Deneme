@@ -131,7 +131,6 @@ record ServoTrajectory(String name, boolean loop, boolean hasSceneEvents, List<C
                     interpolated.putAll(from.getJointAnglesDegrees());
                     interpolated.putAll(to.getJointAnglesDegrees());
                 } else {
-                    // Reuse the simulator's interpolation without scanning the full keyframe list for every tick.
                     segment.getKeyframes().clear();
                     segment.getKeyframes().add(from);
                     segment.getKeyframes().add(to);

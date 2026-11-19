@@ -3,6 +3,7 @@ package rsim2.data;
 public class MetadataDTO {
     public String author;
     public String description;
+    public Float metersPerSceneUnit;
 
     public MetadataDTO() {}
 

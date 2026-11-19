@@ -76,6 +76,15 @@ public class InspectorPanel {
         String windowTitle = targetNode != null ? "Inspector (" + targetNode.getId() + ")" : "Inspector";
         ImGui.begin(windowTitle, flags);
 
+        if (rootNode != null && ImGui.collapsingHeader("Scene units")) {
+            Float scale = rootNode.getMetersPerSceneUnit();
+            ImFloat meters = new ImFloat(scale == null ? 0 : scale);
+            if (ImGui.inputFloat("Meters per unit", meters, 0, 0, "%.6f") && Float.isFinite(meters.get())) {
+                rootNode.setMetersPerSceneUnit(meters.get() > 0 ? meters.get() : null);
+            }
+            if (ImGui.isItemDeactivatedAfterEdit() && engine != null) engine.autoSaveProject();
+            if (scale == null) ImGui.textDisabled("Physical scale unspecified.");
+        }
         if (targetNode == null) {
             ImGui.textDisabled("No object selected.");
             ImGui.end();

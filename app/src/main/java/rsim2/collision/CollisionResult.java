@@ -12,7 +12,17 @@ public class CollisionResult {
     public CollisionResult() {
     }
 
+    private boolean checked;
+
+    public String status() {
+        if (hasCollision()) return "contacts";
+        return checked ? "clear" : "unknown";
+    }
+
+    void markChecked() { checked = true; }
+
     public void clear() {
+        checked = false;
         contacts.clear();
         collidingNodes.clear();
         computationTimeNanos = 0;

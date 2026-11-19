@@ -13,7 +13,8 @@ public class CollisionFilter {
     private boolean groundCollisionEnabled = true;
     private boolean ignoreAdjacentJoints = true;
     private int jointAdjacencyDepth = 2;
-    private float groundHeight = 0.0f;
+    public static final float DEFAULT_GROUND_HEIGHT = 0.0f;
+    private float groundHeight = DEFAULT_GROUND_HEIGHT;
     private float collisionMargin = 0.001f;
     private boolean autoAcmComputed = false;
 

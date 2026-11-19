@@ -83,12 +83,16 @@ public class RobotJsonIO {
         dto.robotName = robotName;
         dto.metadata = new MetadataDTO("RSim2", "Exported robot definition");
 
+        if (root != null) dto.metadata.metersPerSceneUnit = root.getMetersPerSceneUnit();
+
         List<SceneNode> allNodes = new ArrayList<>();
         collectNodes(root, allNodes);
 
         for (SceneNode node : allNodes) {
             LinkDTO link = new LinkDTO();
             link.id = node.getId();
+            Vector3f tcp = node.getTcpOffset();
+            if (tcp != null) link.tcpOffset = new float[]{tcp.x, tcp.y, tcp.z};
 
             List<String> meshPaths = new ArrayList<>();
             link.meshTransforms = new ArrayList<>();
@@ -250,6 +254,10 @@ public class RobotJsonIO {
             }
 
             SceneNode node = new SceneNode(link.id, loadedMeshes);
+            if (link.tcpOffset != null) {
+                if (link.tcpOffset.length != 3) throw new IllegalArgumentException("Invalid TCP offset for " + link.id);
+                node.setTcpOffset(new Vector3f(link.tcpOffset));
+            }
             if (!loadedMeshes.isEmpty() && loadedMeshes.get(0).getSourcePath() != null) {
                 node.setSourceMeshPath(loadedMeshes.get(0).getSourcePath());
             }
@@ -324,6 +332,8 @@ public class RobotJsonIO {
             for (SceneNode node : roots) if (node != world) world.addChild(node);
         }
 
+        if (result.rootNode != null && def.metadata != null)
+            result.rootNode.setMetersPerSceneUnit(def.metadata.metersPerSceneUnit);
         return result;
     }
 

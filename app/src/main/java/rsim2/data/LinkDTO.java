@@ -10,6 +10,7 @@ public class LinkDTO {
     public List<float[]> meshTransforms;
     public float mass;
     public float[] scale;
+    public float[] tcpOffset;
     public float[] rotation;
 
     public LinkDTO() {}

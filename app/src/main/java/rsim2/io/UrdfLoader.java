@@ -283,6 +283,7 @@ public class UrdfLoader {
             result.rootNode.getLocalRotation().rotateX((float) Math.toRadians(-90));
         }
 
+        if (result.rootNode != null) result.rootNode.setMetersPerSceneUnit(1f);
         return result;
     }
 

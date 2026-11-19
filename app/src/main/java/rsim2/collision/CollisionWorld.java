@@ -63,6 +63,7 @@ public class CollisionWorld {
             return lastResult;
         }
 
+        lastResult.markChecked();
         for (SceneNode node : meshNodes) {
             CollisionShape shape = node.getCollisionShape();
             if (shape == null) {

@@ -186,6 +186,25 @@ public class AiInteractionTest {
     }
 
     @Test
+    void rejectsWholeInvalidCommandBeforeTakingControl() {
+        AiActionExecutor.processAndExecute("{\"actions\":[{\"joint\":\"elbow\",\"target_deg\":9}]}", testJoints, motionPlayer);
+        var sequence = motionPlayer.getSequence();
+        float target = testJoints.get(0).getMotor().getTargetAngleRadians();
+        for (String command : List.of(
+                "{\"actions\":[{\"joint\":\"shoulder\",\"target_deg\":20},{\"joint\":\"should\",\"target_deg\":10}]}",
+                "{\"actions\":[{\"joint\":\"shoulder\",\"target_deg\":20},{\"joint\":\"elbow\",\"target_deg\":1e999}]}",
+                "{\"animation\":{\"keyframes\":[{\"time\":0,\"joints\":{\"shoulder\":10}},{\"time\":1,\"joints\":{\"missing\":10}}]}}",
+                "{\"pose\":\"unknown\"}")) {
+            var response = AiActionExecutor.processAndExecute(command, testJoints, motionPlayer);
+            assertTrue(response.rejected, response.cleanedMessage);
+            assertFalse(response.hasActions);
+            assertTrue(motionPlayer.isPlaying());
+            assertSame(sequence, motionPlayer.getSequence());
+            assertEquals(target, testJoints.get(0).getMotor().getTargetAngleRadians());
+        }
+    }
+
+    @Test
     public void nonExecutableResponseIsReported() {
         var result = AiActionExecutor.processAndExecute("Moving now.", testJoints, motionPlayer);
         assertFalse(result.hasActions);

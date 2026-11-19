@@ -151,7 +151,7 @@ public final class McpServer {
         for (JsonObject tool : java.util.List.of(
                 tool("get_connection_status", "Check live simulator connection and control availability.", true),
                 tool("get_robot_state", "Read joint IDs, angles, limits, axes, motors and latest task.", true),
-                tool("get_scene", "Read node IDs, parents, transforms, bounds and mesh metadata. derived_tcp_offset is a geometry hint; use known tool calibration for contact.", true),
+                tool("get_scene", "Read node IDs, parents, transforms, bounds and mesh metadata. summary includes selected_node_id, ground_y, world units, configured or inferred TCPs and object bounds distances. derived_tcp_offset remains a geometry hint.", true),
                 tool("get_task_status", "Poll the latest task: idle, running, paused, completed, blocked, stopped or interrupted.", true),
                 tool("move_joints", "Move with targets_degrees or play multiple ordered waypoints in one task.", false),
                 tool("pick_object_top_down", "Plan and play a single trajectory to approach above the object, orient downward, descend, verify contact and lift. Use a calibrated tool_offset and tool_axis. Poll get_task_status.", false),
@@ -164,7 +164,20 @@ public final class McpServer {
                 tool("move_tcp", "Plan and play world-space Cartesian waypoints for a calibrated TCP, with optional tool approach directions.", false),
                 tool("capture_object", "Attach a free object at verified, collision-free gripper contact. The robot must be stationary.", false),
                 tool("pause_motion", "Pause the current MCP task without consuming future events.", false),
-                tool("resume_motion", "Resume a paused MCP task from its current pose.", false))) {
+                tool("resume_motion", "Resume a paused MCP task from its current pose.", false),
+                tool("preview_approach", "Check a sampled direct TCP approach without starting motion. Returns reachable, partial or no_plan_found and distances to object bounds in scene units. Omit tool_offset to use the configured TCP or geometry hint.", true),
+                tool("get_grasp_state", """
+                        Measure both jaws and an object at the current pose. Supply exact jaw node IDs from get_scene,
+                        or select meshes or inner-pad triangles. Each jaw uses its selected geometry. The object includes its children.
+                        Each jaw reports gap, contact state, closest world points, winding normals and face IDs.
+                        aperture reports linear jaw_opening at the measured section, grasp_center_world between the two inner
+                        surface points, and target width and signed center offset along the fixed-to-moving axis.
+                        width_fits compares widths. object_within_opening_along_axis also accounts for the current axial offset.
+                        Both checks are one-dimensional. For hinged or asymmetric jaws, select inner pads or supply grasp_section
+                        at the desired depth. An unresolved section returns aperture.state=unavailable. Overlapping sections
+                        have zero opening and no grasp center. Distances use scene units. Visual triangles take precedence
+                        unless collision geometry is selected. Curved collision-only surfaces are tessellated.
+                        """, true))) {
             catalog.put(tool.get("name").getAsString(), tool);
         }
         return java.util.Collections.unmodifiableMap(catalog);
@@ -212,12 +225,42 @@ public final class McpServer {
                   }}
                 }}
                 """).getAsJsonObject();
+        if (name.equals("preview_approach")) schema = JsonParser.parseString("""
+                {"type":"object","additionalProperties":false,"required":["object","tool"],"properties":{
+                  "object":{"type":"string"},"tool":{"type":"string"},
+                  "tool_offset":{"type":"array","minItems":3,"maxItems":3,"items":{"type":"number"}}
+                }}
+                """).getAsJsonObject();
         if (name.equals("capture_object")) schema = JsonParser.parseString("""
                 {"type":"object","additionalProperties":false,"required":["object","tool","tool_offset"],"properties":{
                   "object":{"type":"string"},"tool":{"type":"string"},
                   "tool_offset":{"type":"array","minItems":3,"maxItems":3,"items":{"type":"number"}}
                 }}
                 """).getAsJsonObject();
+        if (name.equals("get_grasp_state")) {
+            JsonObject jaw = JsonParser.parseString("""
+                    {"oneOf":[{"type":"string","minLength":1},{"type":"object","additionalProperties":false,
+                      "required":["node"],"properties":{"node":{"type":"string","minLength":1},
+                      "mesh_index":{"type":"integer","minimum":0},
+                      "triangles":{"type":"array","minItems":1,"items":{"type":"integer","minimum":0},
+                        "description":"Optional inner-pad triangle indices within the selected mesh (index-buffer offset divided by three). Requires mesh_index."},
+                      "collision_path":{"type":"array","items":{"type":"integer","minimum":0},
+                        "description":"Alternative to mesh selection. Child indices into the compound collision shape. [] selects the root collider."}}}]}
+                    """).getAsJsonObject();
+            JsonObject properties = schema.getAsJsonObject("properties");
+            properties.add("object", JsonParser.parseString("{\"type\":\"string\",\"minLength\":1}"));
+            properties.add("fixed_jaw", jaw);
+            properties.add("moving_jaw", jaw.deepCopy());
+            properties.add("grasp_section", JsonParser.parseString("""
+                    {"type":"object","additionalProperties":false,"required":["point_local","axis_local"],
+                     "description":"Optional measurement line in the fixed jaw node's local coordinates. By default the section passes through the midpoint of the area-weighted jaw surface centers, along the bisector of the facing surface normals.",
+                     "properties":{"point_local":{"type":"array","minItems":3,"maxItems":3,"items":{"type":"number"},
+                       "description":"A point on the measurement line at the desired pad depth."},
+                       "axis_local":{"type":"array","minItems":3,"maxItems":3,"items":{"type":"number"},
+                       "description":"Nonzero direction across the pads. Either sign is accepted. The reported axis points from the fixed jaw toward the moving jaw."}}}
+                    """));
+            schema.add("required", JsonParser.parseString("[\"object\",\"fixed_jaw\",\"moving_jaw\"]"));
+        }
         if (name.equals("get_geometry")) schema = JsonParser.parseString("""
                 {"type":"object","additionalProperties":false,"required":["node","field"],"properties":{
                   "node":{"type":"string"},"mesh_index":{"type":"integer","minimum":0,"default":0},
