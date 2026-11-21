@@ -29,6 +29,10 @@ public class BridgeStats {
         this.packetsPerSecond = pps;
     }
 
+    public synchronized void clearLastError() {
+        lastError = "";
+    }
+
     public synchronized void setLatencyMs(float latencyMs) {
         this.roundTripLatencyMs = latencyMs;
     }

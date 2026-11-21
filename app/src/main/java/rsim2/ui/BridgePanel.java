@@ -7,6 +7,8 @@ import imgui.type.ImBoolean;
 import org.lwjgl.PointerBuffer;
 import org.lwjgl.system.MemoryStack;
 import org.lwjgl.util.tinyfd.TinyFileDialogs;
+import rsim2.bridge.BridgeManager;
+import rsim2.bridge.FirmataBridge;
 import rsim2.motion.MotionPlayer;
 import rsim2.motion.MotionSequence;
 import rsim2.scene.Joint;
@@ -27,6 +29,9 @@ public class BridgePanel {
     private final MotionPlayer motionPlayer;
     private List<Joint> joints;
     private String statusMessage = "";
+    private List<String> serialPorts;
+    private String selectedPort = "";
+    private String firmataMessage = "";
 
     public BridgePanel(MotionPlayer motionPlayer) {
         this(motionPlayer, null);
@@ -57,12 +62,98 @@ public class BridgePanel {
     public void render() {
         if (!visible) return;
 
-        ImGui.setNextWindowSize(320.0f, 155.0f, ImGuiCond.FirstUseEver);
+        ImGui.setNextWindowSize(410.0f, 365.0f, ImGuiCond.FirstUseEver);
+        ImGui.setNextWindowSizeConstraints(325.0f, 270.0f, Float.MAX_VALUE, Float.MAX_VALUE);
         if (ImGui.begin("Sim2Real", isOpen, ImGuiWindowFlags.NoCollapse)) {
+            renderFirmata();
+            ImGui.spacing();
+            ImGui.separator();
+            ImGui.spacing();
             renderExportButtons();
         }
         ImGui.end();
         visible = isOpen.get();
+    }
+
+    private void renderFirmata() {
+        BridgeManager manager = BridgeManager.getInstance();
+        FirmataBridge firmata = manager.getFirmataBridge();
+        FirmataBridge.ConnectionState state = firmata.getConnectionState();
+        boolean disconnected = state == FirmataBridge.ConnectionState.DISCONNECTED;
+        boolean connected = state == FirmataBridge.ConnectionState.CONNECTED;
+        boolean streaming = connected && manager.isLiveSyncEnabled();
+        boolean stopped = manager.getSafetyFilter().isEmergencyStopActive();
+
+        ImGui.text("Firmata live sync");
+        if (serialPorts == null) refreshSerialPorts();
+        ImGui.beginDisabled(!disconnected);
+        ImGui.setNextItemWidth(130.0f);
+        String preview = serialPorts.isEmpty() ? "No ports found" : "Select port";
+        if (ImGui.beginCombo("##firmataPort", selectedPort.isEmpty() ? preview : selectedPort)) {
+            for (String port : serialPorts) {
+                if (ImGui.selectable(port, port.equals(selectedPort))) selectedPort = port;
+            }
+            ImGui.endCombo();
+        }
+        ImGui.sameLine();
+        if (ImGui.button("Refresh Ports")) refreshSerialPorts();
+        ImGui.endDisabled();
+
+        ImGui.beginDisabled(state == FirmataBridge.ConnectionState.DISCONNECTING || (disconnected && selectedPort.isEmpty()));
+        if (ImGui.button(disconnected ? "Connect" : "Disconnect")) {
+            firmataMessage = "";
+            if (disconnected) manager.connectFirmata(selectedPort);
+            else firmata.disconnect();
+        }
+        ImGui.endDisabled();
+        ImGui.sameLine();
+        ImGui.text(switch (state) {
+            case DISCONNECTED -> "Disconnected";
+            case CONNECTING -> "Connecting to StandardFirmata...";
+            case CONNECTED -> streaming ? "Streaming" : "Connected";
+            case DISCONNECTING -> "Disconnecting...";
+        });
+
+        ImGui.beginDisabled(!connected || stopped);
+        if (ImGui.button(streaming ? "Stop Live Sync" : "Start Live Sync")) {
+            firmataMessage = "";
+            try {
+                manager.setLiveSyncEnabled(!streaming);
+            } catch (IllegalArgumentException error) {
+                firmataMessage = error.getMessage();
+            }
+        }
+        ImGui.endDisabled();
+        ImGui.sameLine();
+        ImGui.beginDisabled(!connected && !stopped);
+        if (ImGui.button(stopped ? "Reset E-stop" : "E-stop")) {
+            firmataMessage = "";
+            if (stopped) manager.resetEmergencyStop();
+            else manager.triggerEmergencyStop();
+        }
+        ImGui.endDisabled();
+
+        String error = firmataMessage.isEmpty() ? firmata.getStats().getLastError() : firmataMessage;
+        if (!error.isEmpty()) ImGui.textWrapped(error);
+        if (stopped) ImGui.textWrapped("E-stop active. Live sync requires a manual restart.");
+        if (disconnected) {
+            ImGui.textWrapped("Upload StandardFirmata (57600 baud) and assign servo pins in the Inspector.");
+        } else if (connected) {
+            ImGui.textWrapped("Live sync starts at the current pose. Servos can hold their last target after a stop.");
+        }
+    }
+
+    private void refreshSerialPorts() {
+        firmataMessage = "";
+        try {
+            serialPorts = FirmataBridge.serialPortNames();
+        } catch (RuntimeException | LinkageError error) {
+            serialPorts = List.of();
+            firmataMessage = "Could not list serial ports. " + error.getMessage();
+        }
+        if (!serialPorts.contains(selectedPort)) {
+            selectedPort = serialPorts.size() == 1 ? serialPorts.getFirst() : "";
+        }
     }
 
     private void renderExportButtons() {

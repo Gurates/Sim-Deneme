@@ -12,6 +12,7 @@ public class BridgeManager {
     private static final BridgeManager INSTANCE = new BridgeManager();
 
     private final List<RobotBridge> availableBridges = new ArrayList<>();
+    private final FirmataBridge firmata = new FirmataBridge();
     private RobotBridge activeBridge;
     private final SafetyFilter safetyFilter = new SafetyFilter();
 
@@ -35,6 +36,7 @@ public class BridgeManager {
 
         availableBridges.add(udp);
         availableBridges.add(mock);
+        availableBridges.add(firmata);
 
         for (RobotBridge b : availableBridges) {
             b.setTelemetryListener(this::onTelemetryReceived);
@@ -55,15 +57,32 @@ public class BridgeManager {
         return activeBridge;
     }
 
+    public FirmataBridge getFirmataBridge() {
+        return firmata;
+    }
+
+    public synchronized boolean connectFirmata(String portName) {
+        if (firmata.getConnectionState() != FirmataBridge.ConnectionState.DISCONNECTED) return false;
+        setActiveBridge(firmata);
+        safetyFilter.clearAngleHistory();
+        return firmata.connect(portName, FirmataBridge.BAUD_RATE);
+    }
+
     public synchronized void setActiveBridge(RobotBridge bridge) {
-        if (this.activeBridge != null && this.activeBridge.isConnected()) {
+        if (this.activeBridge != null) {
             this.activeBridge.disconnect();
         }
+        liveSyncEnabled = false;
+        lastPublishTimeNanos = 0;
         this.activeBridge = bridge != null ? bridge : availableBridges.get(0);
         this.activeBridge.setTelemetryListener(this::onTelemetryReceived);
     }
 
     public synchronized void registerJoints(List<Joint> joints) {
+        if (registeredJoints != joints && activeBridge instanceof FirmataBridge serial) {
+            serial.stopStreaming("Robot changed. Check the hardware mapping and restart live sync.");
+            safetyFilter.clearAngleHistory();
+        }
         this.registeredJoints = joints;
     }
 
@@ -106,11 +125,22 @@ public class BridgeManager {
         return safetyFilter;
     }
 
-    public boolean isLiveSyncEnabled() {
-        return liveSyncEnabled;
+    public synchronized boolean isLiveSyncEnabled() {
+        return activeBridge instanceof FirmataBridge serial ? serial.isStreaming() : liveSyncEnabled;
     }
 
-    public void setLiveSyncEnabled(boolean liveSyncEnabled) {
+    public synchronized void setLiveSyncEnabled(boolean liveSyncEnabled) {
+        if (activeBridge instanceof FirmataBridge serial) {
+            if (liveSyncEnabled) {
+                if (safetyFilter.isEmergencyStopActive()) throw new IllegalArgumentException("Reset E-stop before starting live sync.");
+                if (collisionBlocksStreaming()) throw new IllegalArgumentException("Resolve the collision before starting live sync.");
+                serial.arm(registeredJoints);
+                lastPublishTimeNanos = 0;
+            } else {
+                serial.disarm();
+            }
+            return;
+        }
         this.liveSyncEnabled = liveSyncEnabled;
     }
 
@@ -124,11 +154,17 @@ public class BridgeManager {
     }
 
     public synchronized void streamJointPositions(Map<String, Float> rawAnglesDegrees, float timestamp, List<Joint> joints) {
-        if (!liveSyncEnabled || activeBridge == null || !activeBridge.isConnected()) {
+        if (!isLiveSyncEnabled() || activeBridge == null || !activeBridge.isConnected()) {
             return;
         }
 
-        if (safetyFilter.isEmergencyStopActive()) {
+        boolean emergencyStopped = safetyFilter.isEmergencyStopActive();
+        FirmataBridge serial = activeBridge instanceof FirmataBridge bridge ? bridge : null;
+        if (serial != null && (emergencyStopped || collisionBlocksStreaming())) {
+            serial.stopStreaming(emergencyStopped ? "E-stop activated." : "Collision detected. Resolve it before restarting live sync.");
+            return;
+        }
+        if (emergencyStopped) {
             return;
         }
 
@@ -138,7 +174,10 @@ public class BridgeManager {
         }
         lastPublishTimeNanos = now;
 
-        Map<String, Float> safeAngles = safetyFilter.processAndFilter(rawAnglesDegrees, joints);
+        if (serial != null && !serial.verifyMapping(joints)) return;
+        Map<String, Float> safeAngles = serial == null
+                ? safetyFilter.processAndFilter(rawAnglesDegrees, joints)
+                : safetyFilter.processSimulationAngles(rawAnglesDegrees, joints);
 
         activeBridge.sendJointPositions(safeAngles, timestamp);
 
@@ -147,8 +186,8 @@ public class BridgeManager {
 
     public synchronized void streamCurrentJointStates(List<Joint> joints, float timestamp) {
         if (joints == null) return;
-        this.registeredJoints = joints;
-        if (!liveSyncEnabled) return;
+        registerJoints(joints);
+        if (!isLiveSyncEnabled()) return;
 
         reusableDegreesMap.clear();
         for (Joint j : joints) {
@@ -168,6 +207,10 @@ public class BridgeManager {
 
     public synchronized void resetEmergencyStop() {
         safetyFilter.resetEmergencyStop();
+    }
+
+    private boolean collisionBlocksStreaming() {
+        return safetyFilter.isPreventCollisionStreaming() && safetyFilter.isCollisionStopActive();
     }
 
     private void updatePacketsPerSecond(long nowNanos) {

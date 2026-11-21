@@ -106,7 +106,11 @@ public class Engine {
     public void run() {
         System.out.println("Starting Engine...");
         init();
-        loop();
+        try {
+            loop();
+        } finally {
+            rsim2.bridge.BridgeManager.getInstance().getFirmataBridge().close();
+        }
 
         if (commandHistory != null) {
             commandHistory.clear();
@@ -649,19 +653,16 @@ public class Engine {
                     aiPanel.reportMotionStatus("Playback stopped: " + error.getMessage(), true);
                 }
             }
-            // Only publish poses after validation. Rejected steps never reach hardware or rendering.
             mcpRobot.afterStep(rootNode, joints, motionPlayer, blocked);
-            rsim2.bridge.BridgeManager.getInstance().streamCurrentJointStates(joints,
-                    motionPlayer != null ? motionPlayer.getCurrentTime() : 0.0f);
 
             if (collisionWorld != null) {
                 collisionWorld.update(rootNode, joints);
-                if (collisionPanel != null && collisionPanel.isStopOnCollision()) {
-                    rsim2.bridge.BridgeManager.getInstance().getSafetyFilter().setCollisionStopActive(
-                            collisionWorld.getLastResult().hasCollision()
-                    );
-                }
             }
+            // Check the current frame's collision state before publishing the validated pose.
+            var bridge = rsim2.bridge.BridgeManager.getInstance();
+            bridge.getSafetyFilter().setCollisionStopActive(collisionWorld != null && collisionPanel != null
+                    && collisionPanel.isStopOnCollision() && collisionWorld.getLastResult().hasCollision());
+            bridge.streamCurrentJointStates(joints, motionPlayer != null ? motionPlayer.getCurrentTime() : 0.0f);
 
             SceneNode gizmoTarget = (selectionManager != null) ? selectionManager.getSelected() : null;
             if (gizmoTarget != null && gizmoTarget.getParent() == null) {

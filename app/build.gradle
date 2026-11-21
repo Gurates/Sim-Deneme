@@ -55,6 +55,11 @@ dependencies {
     runtimeOnly "io.github.spair:${imguiNatives}:${libs.versions.imgui.get()}"
 
     implementation libs.gson
+
+    implementation('com.github.kurbatov:firmata4j:2.3.8') {
+        exclude group: 'org.scream3r', module: 'jssc'
+    }
+    implementation 'com.fazecast:jSerialComm:2.11.0'
 }
 
 java {

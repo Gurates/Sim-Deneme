@@ -25,6 +25,15 @@ public class SafetyFilter {
     }
 
     public synchronized Map<String, Float> processAndFilter(Map<String, Float> rawAnglesDegrees, List<Joint> joints) {
+        return processAndFilter(rawAnglesDegrees, joints, enforceServo0To180);
+    }
+
+    public synchronized Map<String, Float> processSimulationAngles(Map<String, Float> rawAnglesDegrees, List<Joint> joints) {
+        return processAndFilter(rawAnglesDegrees, joints, false);
+    }
+
+    private Map<String, Float> processAndFilter(Map<String, Float> rawAnglesDegrees, List<Joint> joints,
+                                               boolean enforceServo0To180) {
         Map<String, Float> safeAngles = new HashMap<>();
 
         if (emergencyStopActive || (preventCollisionStreaming && collisionStopActive) || rawAnglesDegrees == null) {
@@ -118,6 +127,11 @@ public class SafetyFilter {
         this.softStartActive = true;
         this.softStartBeginNanos = System.nanoTime();
         this.lastFilterTimeNanos = 0;
+    }
+
+    public synchronized void clearAngleHistory() {
+        lastFilteredSimulationAngles.clear();
+        lastFilterTimeNanos = 0;
     }
 
     public synchronized boolean isEmergencyStopActive() {
