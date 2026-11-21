@@ -8,14 +8,12 @@ import rsim2.scene.SceneNode;
 
 import java.util.*;
 
-
 public final class EnvironmentMotionGuard {
     private static final float EPS = 0.00001f;
     private static final int MAX_SAMPLES = 10000;
 
-    private record Body(SceneNode node, SceneNode environment, boolean movable, AABB local, CollisionShape shape, Matrix4f localTransform) {}
+    private record Body(SceneNode node, SceneNode environment, boolean movable, AABB local) {}
     private record Bounds(OBB box, Matrix4f transform) {}
-
 
     public String validateStep(SceneNode root, List<Joint> joints, float[] before, float[] after) {
         if (root == null || joints == null) return null;
@@ -48,9 +46,7 @@ public final class EnvironmentMotionGuard {
                 }
                 travel += delta * radius;
             }
-
-
-            double distanceStep = Math.max(0.0001, smallest * 0.5);
+            double distanceStep = Math.max(0.0001, Math.min(0.002, smallest * 0.5));
             double required = Math.max(Math.ceil(angularTravel / 0.01), Math.ceil(travel / distanceStep));
             if (!Double.isFinite(required) || required > MAX_SAMPLES) return "Motion step is too large to collision-check safely.";
             int samples = Math.max(1, (int) required);
@@ -66,7 +62,6 @@ public final class EnvironmentMotionGuard {
             for (int i = 0; i < joints.size(); i++) joints.get(i).setAngle(saved[i]);
         }
     }
-
 
     public String collisionAtPose(SceneNode root, List<Joint> joints) {
         if (root == null) return null;
@@ -89,33 +84,16 @@ public final class EnvironmentMotionGuard {
     private static void collect(SceneNode node, SceneNode environment, boolean movable, Set<SceneNode> roots, List<Body> result) {
         if (environment == null && !node.isRobotPart()) environment = node;
         movable |= roots.contains(node);
-        if (node.getCollisionShape() != null) {
-            collectShape(node, environment, movable, node.getCollisionShape(), new Matrix4f(), result);
-        } else for (var mesh : node.getMeshes()) {
-            // Combining separate finger meshes into one box fills the open gripper gap.
-            AABB local = new AABB(mesh.getMinBound(), mesh.getMaxBound());
-            if (local.isValid()) result.add(new Body(node, environment, movable, local, new ConvexMeshShape(mesh.getVertices()), new Matrix4f()));
-        }
+        AABB local = node.getCollisionShape() != null ? node.getCollisionShape().getLocalAABB()
+                : node.getMeshes().isEmpty() ? null : new AABB(node.getCombinedBoundingBoxMin(), node.getCombinedBoundingBoxMax());
+        if (local != null && local.isValid()) result.add(new Body(node, environment, movable, local));
         for (SceneNode child : node.getChildren()) collect(child, environment, movable, roots, result);
-    }
-
-    private static void collectShape(SceneNode node, SceneNode environment, boolean movable,
-                                     CollisionShape shape, Matrix4f localTransform, List<Body> result) {
-        if (shape instanceof CompoundShape compound) {
-            // Preserve real openings between imported collision parts. A single
-
-            for (var entry : compound.getChildren()) collectShape(node, environment, movable,
-                    entry.getShape(), new Matrix4f(localTransform).mul(entry.getLocalTransform()), result);
-        } else {
-            AABB local = shape.getLocalAABB();
-            if (local.isValid()) result.add(new Body(node, environment, movable, local, shape, localTransform));
-        }
     }
 
     private static List<Bounds> bounds(List<Body> bodies) {
         List<Bounds> result = new ArrayList<>(bodies.size());
         for (Body body : bodies) {
-            Matrix4f transform = body.node.getWorldTransform().mul(body.localTransform);
+            Matrix4f transform = body.node.getWorldTransform();
             OBB box = new OBB();
             box.fromAABBAndTransform(body.local, transform);
             // Nonuniformly scaled, rotated ancestors may introduce shear. An AABB encloses it safely.
@@ -138,46 +116,27 @@ public final class EnvironmentMotionGuard {
             if (!ba.box.getCenter().isFinite() || !ba.box.getHalfExtents().isFinite()) return "Invalid geometry: " + a.node.getId();
             if (checkGround && a.movable && ba.box.getMinY() < -EPS) {
                 boolean unchanged = previous != null && ba.transform.equals(previous.get(i).transform, 1e-7f);
-                // Imported bases can already sit a little below the floor. Rotation along the
-
-                boolean escaping = previous != null && previous.get(i).box.getMinY() < -EPS
-                        && ba.box.getMinY() >= previous.get(i).box.getMinY() - EPS;
+                boolean escaping = previous != null && ba.box.getMinY() > previous.get(i).box.getMinY() + EPS;
                 if (!unchanged && !escaping) return a.node.getId() + " intersects the ground.";
             }
             for (int j = i + 1; j < bodies.size(); j++) {
                 Body b = bodies.get(j);
-                if (a.environment == null && b.environment == null) continue;
+                if (a.environment == null && b.environment == null) continue; // Robot self-collision belongs to CollisionWorld.
                 if (a.environment != null && a.environment == b.environment) continue;
                 if (!a.movable && !b.movable) continue;
                 float overlap = penetration(ba.box, current.get(j).box);
-                if (overlap <= EPS || !intersects(a, ba, b, current.get(j))) continue;
+                if (overlap <= EPS) continue; // Surface contact is allowed, interior overlap is not.
                 if (previous != null) {
                     if (ba.transform.equals(previous.get(i).transform, 1e-7f)
                             && current.get(j).transform.equals(previous.get(j).transform, 1e-7f)) continue;
                     float oldOverlap = penetration(previous.get(i).box, previous.get(j).box);
-                    if (oldOverlap > EPS && intersects(a, previous.get(i), b, previous.get(j)) && overlap < oldOverlap - EPS) continue;
+                    if (oldOverlap > EPS && overlap < oldOverlap - EPS) continue;
                 }
                 return a.node.getId() + " intersects " + b.node.getId() + ".";
             }
         }
         return null;
     }
-
-
-    private static boolean intersects(Body a, Bounds ba, Body b, Bounds bb) {
-        // These support maps currently express their radii in world units.
-        // Normalizing their transforms would shrink the effective radius and
-
-        if (a.shape instanceof SphereShape || a.shape instanceof CapsuleShape
-                || b.shape instanceof SphereShape || b.shape instanceof CapsuleShape) return true;
-        Vector3f center = new Vector3f(ba.box.getCenter()).add(bb.box.getCenter()).mul(.5f);
-        float size = Math.max(ba.box.getHalfExtents().length(), bb.box.getHalfExtents().length());
-        // GJK's absolute numerical thresholds need a stable geometry scale.
-        Matrix4f normalize = new Matrix4f().scaling(100f / Math.max(size, .0001f)).translate(center.negate());
-        return CollisionMath.intersectGJKConservative(a.shape, new Matrix4f(normalize).mul(ba.transform),
-                b.shape, new Matrix4f(normalize).mul(bb.transform));
-    }
-
 
     private static float penetration(OBB a, OBB b) {
         float minimum = Float.POSITIVE_INFINITY;

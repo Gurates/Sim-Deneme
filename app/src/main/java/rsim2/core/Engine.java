@@ -300,7 +300,6 @@ public class Engine {
             this.rootNode = new SceneNode("world");
             if (res.rootNode != null) {
                 this.rootNode.addChild(res.rootNode);
-                this.rootNode.setMetersPerSceneUnit(res.rootNode.getMetersPerSceneUnit());
             }
             this.joints = res.joints != null ? res.joints : new ArrayList<>();
             rememberLoadedPose(res.rootNode);
@@ -414,7 +413,6 @@ public class Engine {
             }
         }
         for (Joint joint : joints) {
-            // The load-time motor target already accounts for models whose limits exclude zero.
             var motor = joint.getMotor();
             if (motor != null) loadedJointAngles.put(joint, motor.getTargetAngleRadians());
         }
@@ -620,8 +618,6 @@ public class Engine {
             mcpBridge.drain(request -> mcpRobot.execute(request.get("tool").getAsString(),
                     request.getAsJsonObject("arguments"), rootNode, joints, motionPlayer,
                     collisionWorld == null ? null : collisionWorld.getLastResult(),
-                    collisionWorld == null ? null : collisionWorld.getFilter(),
-                    selectionManager == null ? null : selectionManager.getSelected(),
                     motionPlayer.isReplayingEvents() || (aiPanel != null && aiPanel.hasActiveInteraction()),
                     () -> {
                         rsim2.mcp.McpBridge.ensureRequestActive();

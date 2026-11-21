@@ -6,7 +6,6 @@ import rsim2.scene.SceneNode;
 import java.util.ArrayList;
 import java.util.List;
 
-
 public final class MotionCollisionState {
     private final EnvironmentMotionGuard guard = new EnvironmentMotionGuard();
     private SceneNode sceneRoot;
@@ -28,7 +27,7 @@ public final class MotionCollisionState {
         }
     }
 
-
+    /** Restores rejected poses and stops their motors. The caller pauses trajectory playback. */
     public String validateAndCommit(SceneNode root, List<Joint> joints) {
         beginStep(root, joints);
         float[] current = angles(sceneJoints);

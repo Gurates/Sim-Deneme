@@ -2,7 +2,6 @@ package rsim2.io;
 
 import rsim2.graphics.Mesh;
 
-
 public final class PrimitiveMeshFactory {
     private static final int CYLINDER_SEGMENTS = 32;
 

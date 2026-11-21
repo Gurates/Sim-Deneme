@@ -218,10 +218,6 @@ public class ToolbarPanel {
         if (ImGui.checkbox("##loopPlayback", loopBool)) {
             if (motionPlayer != null) {
                 motionPlayer.setLooping(loopBool.get());
-
-                if (ImGui.isItemHovered()) {
-                ImGui.setTooltip("Loop motion playback");
-            }
             }
         }
         ImGui.endDisabled();
