@@ -148,7 +148,7 @@ public class ObjectInteractionController {
         pendingChain = chain;
         pendingTarget = target;
         objectPoseAtPlan = object.getWorldTransform();
-        return "Approaching the surface of " + objectId + " with " + toolId + "; attachment requires a clear approach without object penetration.";
+        return "Approaching the surface of " + objectId + " with " + toolId + ". Attachment requires tool contact.";
     }
 
 
@@ -445,6 +445,44 @@ public class ObjectInteractionController {
 
     public boolean isHeld(SceneNode object) { return originalParents.containsKey(object); }
 
+    public record ReplayPose(SceneNode object, SceneNode parent, int index, SceneNode releaseParent,
+                             Vector3f position, Quaternionf rotation, Vector3f scale) {}
+
+    public ReplayPose replayPose(SceneNode object) {
+        SceneNode parent = object.getParent();
+        return new ReplayPose(object, parent, parent.indexOfChild(object), originalParents.get(object),
+                new Vector3f(object.getLocalPosition()), new Quaternionf(object.getLocalRotation()),
+                new Vector3f(object.getLocalScale()));
+    }
+
+    public void restoreReplayPoses(SceneNode root, Collection<ReplayPose> poses) {
+        Set<SceneNode> participants = new HashSet<>();
+        for (ReplayPose pose : poses) participants.add(pose.object());
+        for (ReplayPose pose : poses) {
+            if (findNode(root, pose.object().getId()) != pose.object() || !isAncestor(root, pose.parent())
+                    || isAncestor(pose.object(), pose.parent())
+                    || pose.releaseParent() != null && !isAncestor(root, pose.releaseParent())) {
+                throw new IllegalArgumentException("Motion object or its starting parent has changed: " + pose.object().getId());
+            }
+            if (pose.releaseParent() != null && originalParents.keySet().stream()
+                    .anyMatch(n -> n.getParent() == pose.parent() && !participants.contains(n))) {
+                throw new IllegalArgumentException("Starting tool already holds another object: " + pose.parent().getId());
+            }
+        }
+        for (ReplayPose pose : poses) {
+            SceneNode object = pose.object();
+            if (object.getParent() != pose.parent()) {
+                object.getParent().removeChild(object);
+                pose.parent().addChild(pose.index(), object);
+            }
+            object.getLocalPosition().set(pose.position());
+            object.getLocalRotation().set(pose.rotation());
+            object.getLocalScale().set(pose.scale());
+            if (pose.releaseParent() == null) originalParents.remove(object);
+            else originalParents.put(object, pose.releaseParent());
+        }
+    }
+
 
     public String lift(SceneNode root, List<Joint> joints, String objectId, float height) {
         SceneNode object = findNode(root, objectId);
@@ -735,6 +773,7 @@ public class ObjectInteractionController {
     }
 
     public void bindPlayback(MotionPlayer player, MotionSequence sequence, boolean completeOnCapture) {
+        player.rememberInteractionStart(pendingObject, this);
         approachPlayer = player;
         approachSequence = sequence;
         approachStopGeneration = player.getStopGeneration();

@@ -49,7 +49,6 @@ final class JSerialCommTransport implements TransportInterface, SerialPortDataLi
     }
 
     void prepareForClose() {
-        // FirmataDevice writes report-disable messages before releasing its parser and transport.
         closing = true;
     }
 

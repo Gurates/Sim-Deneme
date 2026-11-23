@@ -180,7 +180,9 @@ public class ToolbarPanel {
                 ImGui.pushStyleColor(ImGuiCol.ButtonHovered, 0.22f, 0.78f, 0.42f, 1.0f);
             }
             ImGui.beginDisabled(playbackBlockReason != null);
-            if (ImGui.button("> Play", 68.0f, 24.0f)) {
+            boolean replay = hasSequence && !motionPlayer.getSequence().getEvents().isEmpty()
+                    && !motionPlayer.getSequence().isIncomplete() && motionPlayer.getCurrentTime() >= motionPlayer.getDuration();
+            if (ImGui.button(replay ? "> Play" : "> Play", 68.0f, 24.0f)) {
                 try {
                     engine.playMotion();
                     motionStatus = "";
@@ -222,6 +224,10 @@ public class ToolbarPanel {
         }
         ImGui.endDisabled();
 
+        if (interactionMotion && ImGui.isItemHovered(ImGuiHoveredFlags.AllowWhenDisabled)) {
+            ImGui.setTooltip("Interaction motions run once. Use Play to run the motion again.");
+        }
+
         ImGui.sameLine(displayWidth - 620.0f);
         renderMotionFiles(motionPlayer);
 
@@ -239,8 +245,9 @@ public class ToolbarPanel {
                 motionPlayer.seek(timeVal.get(), engine.getJoints());
             }
             ImGui.endDisabled();
-            if (ImGui.isItemHovered()) {
-                ImGui.setTooltip(String.format("Motion: %s (%.2fs / %.2fs)", seq.getName(), curTime, duration));
+            if (ImGui.isItemHovered(ImGuiHoveredFlags.AllowWhenDisabled)) {
+                String hint = interactionMotion ? "\nSeeking is disabled while the motion includes object interactions." : "";
+                ImGui.setTooltip(String.format("Motion: %s (%.2fs / %.2fs)%s", seq.getName(), curTime, duration, hint));
             }
         }
 

@@ -60,6 +60,10 @@ public class MotionSequence {
     public void setIncomplete(boolean incomplete) { this.incomplete = incomplete; }
 
     public void validateReplay(SceneNode root, ObjectInteractionController interactions) {
+        validateReplay(root, interactions::isHeld);
+    }
+
+    void validateReplay(SceneNode root, java.util.function.Predicate<SceneNode> initiallyHeld) {
         Set<String> checkedObjects = new HashSet<>();
         for (MotionEvent event : events) {
             SceneNode object = ObjectInteractionController.findNode(root, event.objectId());
@@ -72,7 +76,7 @@ public class MotionSequence {
                     throw new IllegalArgumentException("Motion tool is missing: " + event.toolId());
                 }
             }
-            if (checkedObjects.add(event.objectId()) && (event.toolId() == null) != interactions.isHeld(object)) {
+            if (checkedObjects.add(event.objectId()) && (event.toolId() == null) != initiallyHeld.test(object)) {
                 throw new IllegalArgumentException(event.toolId() == null ? "Hold " + event.objectId() + " before playback."
                         : "Release " + event.objectId() + " and return it to its starting position before playback.");
             }

@@ -124,6 +124,7 @@ public final class EnvironmentMotionGuard {
                 if (a.environment == null && b.environment == null) continue; // Robot self-collision belongs to CollisionWorld.
                 if (a.environment != null && a.environment == b.environment) continue;
                 if (!a.movable && !b.movable) continue;
+                if (CollisionFilter.allowsRobotContact(a.environment, b.environment)) continue;
                 float overlap = penetration(ba.box, current.get(j).box);
                 if (overlap <= EPS) continue; // Surface contact is allowed, interior overlap is not.
                 if (previous != null) {

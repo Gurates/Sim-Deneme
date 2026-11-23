@@ -13,6 +13,7 @@ import rsim2.collision.ContactPair;
 import rsim2.core.Engine;
 import rsim2.editor.SelectionManager;
 import rsim2.scene.Joint;
+import rsim2.scene.ObjectInteractionController;
 import rsim2.scene.SceneNode;
 
 import java.util.ArrayList;
@@ -116,6 +117,19 @@ public class CollisionPanel {
 
             if (ImGui.checkbox("Ground Collision", enableGroundCollision)) {
                 filter.setGroundCollisionEnabled(enableGroundCollision.get());
+            }
+
+            if (ImGui.collapsingHeader("Allow Robot Contact")) {
+                List<SceneNode> objects = ObjectInteractionController.objects(rootNode);
+                if (objects.isEmpty()) ImGui.textDisabled("No scene objects.");
+                for (int i = 0; i < objects.size(); i++) {
+                    SceneNode object = objects.get(i);
+                    ImGui.pushID(i);
+                    boolean allowed = object.isRobotContactAllowed();
+                    if (ImGui.checkbox(object.getId(), allowed)) object.setRobotContactAllowed(!allowed);
+                    if (ImGui.isItemHovered()) ImGui.setTooltip("Allow any robot part to overlap this object.");
+                    ImGui.popID();
+                }
             }
 
             if (ImGui.checkbox("Show 3D Bounding Boxes (Wireframe)", debugWireframes)) {

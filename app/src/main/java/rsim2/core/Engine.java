@@ -507,7 +507,8 @@ public class Engine {
             return;
         }
         if (!sequence.getEvents().isEmpty() && !sequence.isIncomplete()) {
-            if (motionPlayer.startsNewPlayback()) sequence.validateReplay(rootNode, aiPanel.getObjectInteractions());
+            motionPlayer.playInteraction(rootNode, aiPanel.getObjectInteractions());
+            return;
         }
         motionPlayer.play();
     }
@@ -631,7 +632,7 @@ public class Engine {
             if ((motionPlayer.isReplayingEvents() || motionPlayer.isPreviewingIncompleteMotion())
                     && !canReplayInteractions()) motionPlayer.cancelReplay();
             if (motionPlayer.isPlaying()) {
-                motionPlayer.update(mcpRobot.limitDelta(deltaTime, motionPlayer), joints);
+                motionPlayer.updateFromRenderFrame(mcpRobot.limitDelta(deltaTime, motionPlayer), joints);
             } else if (joints != null) {
                 for (Joint joint : joints) {
                     if (joint != null && joint.getMotor() != null) {

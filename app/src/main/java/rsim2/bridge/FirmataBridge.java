@@ -193,7 +193,6 @@ public class FirmataBridge implements RobotBridge {
             stopStreaming(error.getMessage());
             return;
         }
-        // Keep only the newest waiting pose if the serial writer falls behind.
         pendingFrame = new Frame(streamingChannels, angles);
         notifyAll();
     }
@@ -234,7 +233,6 @@ public class FirmataBridge implements RobotBridge {
             recordConnectionError("Firmata on " + portName + ": " + error.getMessage());
         } finally {
             disconnect();
-            // An interrupted handshake still needs to release the serial listener.
             Thread.interrupted();
             try {
                 if (transport instanceof JSerialCommTransport serial) serial.prepareForClose();

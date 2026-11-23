@@ -240,6 +240,8 @@ public final class McpRobotController {
         if (sequence != null) {
             sequence.setIncomplete(pick != null || !events.isEmpty());
             player.loadSequence(sequence);
+            if (pick != null) player.rememberInteractionStart(pick.object(), interactions);
+            for (var event : events) player.rememberInteractionStart(event.object(), interactions);
             player.setPlaybackSpeed(1);
             player.play();
         }

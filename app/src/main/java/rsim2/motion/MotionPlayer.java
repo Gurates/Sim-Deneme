@@ -10,6 +10,7 @@ import java.util.Map;
 import java.util.ArrayList;
 
 public class MotionPlayer {
+    private static final float MAX_RENDER_STEP_SECONDS = 0.05f;
     private MotionSequence sequence;
     private float currentTime = 0.0f;
     private float playbackSpeed = 1.0f;
@@ -22,6 +23,7 @@ public class MotionPlayer {
     private int nextEvent;
     private int nextReplayFrame;
     private List<Joint> controlledJoints = List.of();
+    private final Map<SceneNode, ObjectInteractionController.ReplayPose> interactionStart = new HashMap<>();
 
     private final Map<String, Float> sampledAngles = new HashMap<>();
 
@@ -29,6 +31,7 @@ public class MotionPlayer {
     }
 
     public void loadSequence(MotionSequence sequence) {
+        interactionStart.clear();
         isPlaying = false;
         this.sequence = sequence;
         this.currentTime = 0.0f;
@@ -113,6 +116,11 @@ public class MotionPlayer {
         applyCurrentFrame(joints);
     }
 
+    /** Discard excess wall time after a slow render frame so the next pose remains visible. */
+    public void updateFromRenderFrame(float elapsedSeconds, List<Joint> joints) {
+        update(Math.min(elapsedSeconds, MAX_RENDER_STEP_SECONDS), joints);
+    }
+
     public void update(float deltaTime, List<Joint> joints) {
         bindJoints(joints);
         if (!isPlaying || !hasSequence() || joints == null) {
@@ -155,6 +163,24 @@ public class MotionPlayer {
 
     public boolean startsNewPlayback() {
         return !replayingEvents && (currentTime == 0.0f || currentTime >= getDuration());
+    }
+
+    public void rememberInteractionStart(SceneNode object, ObjectInteractionController interactions) {
+        interactionStart.computeIfAbsent(object, interactions::replayPose);
+    }
+
+    public void playInteraction(SceneNode root, ObjectInteractionController interactions) {
+        if (startsNewPlayback()) {
+            sequence.validateReplay(root, object -> {
+                var start = interactionStart.get(object);
+                return start == null ? interactions.isHeld(object) : start.releaseParent() != null;
+            });
+            interactions.restoreReplayPoses(root, interactionStart.values());
+            for (MotionEvent event : sequence.getEvents()) {
+                rememberInteractionStart(ObjectInteractionController.findNode(root, event.objectId()), interactions);
+            }
+        }
+        play();
     }
 
     public void cancelReplay() {

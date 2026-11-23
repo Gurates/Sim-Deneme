@@ -6,6 +6,7 @@ import org.junit.jupiter.api.Test;
 import rsim2.collision.BoxShape;
 import rsim2.collision.EnvironmentMotionGuard;
 import rsim2.scene.Joint;
+import rsim2.scene.ObjectInteractionController;
 import rsim2.scene.SceneNode;
 
 import java.util.List;
@@ -59,6 +60,32 @@ class EnvironmentMotionGuardTest {
     @Test void finalOverlapIsBlockedEvenWithoutMeshOrDebugCollisionWorld() {
         obstacle("box", 1, 1, 0.1f);
         assertNotNull(guard.collisionAtPose(root, List.of(joint)));
+    }
+
+    @Test void permittedBoxCanBeGraspedAndLiftedButStillHitsOtherObjects() {
+        SceneNode box = obstacle("box", 1.115f, 1, .1f);
+        var interactions = new ObjectInteractionController();
+        List<Joint> joints = List.of(joint);
+        Vector3f tip = new Vector3f(.02f, 0, 0);
+        assertThrows(IllegalArgumentException.class, () -> interactions.captureAtContact(root, joints, box, tool, tip));
+
+        box.setRobotContactAllowed(true);
+        interactions.captureAtContact(root, joints, box, tool, tip);
+        assertSame(tool, box.getParent());
+        float[] from = {0}, to = {.4f};
+        assertNull(guard.validateStep(root, joints, from, to));
+        joint.setAngle(to[0]);
+        assertTrue(ObjectInteractionController.objectCenter(box).y > 1.4f);
+        joint.setAngle(from[0]);
+        SceneNode wall = obstacle("wall", 1.17f, 1.24f, .02f);
+        wall.setRobotContactAllowed(true);
+        String blocked = guard.validateStep(root, joints, from, to);
+        assertNotNull(blocked);
+        assertTrue(blocked.contains("box") && blocked.contains("wall"), blocked);
+
+        interactions.release(root, "box");
+        box.setRobotContactAllowed(false);
+        assertNotNull(guard.collisionAtPose(root, joints));
     }
 
     @Test void carriedObjectCannotPassThroughAnotherObject() {

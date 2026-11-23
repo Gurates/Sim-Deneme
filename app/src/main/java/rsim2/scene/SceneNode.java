@@ -267,6 +267,24 @@ public class SceneNode {
     }
 
     private boolean robotPart = true;
+    private boolean robotContactAllowed;
+
+    public boolean isRobotContactAllowed() {
+        return robotContactAllowed;
+    }
+
+    public void setRobotContactAllowed(boolean allowed) {
+        robotContactAllowed = allowed;
+    }
+
+    /** Outermost environment object containing this node, including when attached to a tool. */
+    public SceneNode getEnvironmentObject() {
+        SceneNode object = null;
+        for (SceneNode node = this; node != null; node = node.parent) {
+            if (!node.isRobotPart()) object = node;
+        }
+        return object;
+    }
 
     public boolean isRobotPart() {
         return robotPart;

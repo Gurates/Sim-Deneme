@@ -76,7 +76,29 @@ class GraspLiftSequenceTest {
         assertTrue(box.getWorldTransform().getTranslation(new Vector3f()).y - startPosition.y >= .094f);
 
         MotionSequenceIO.save(wholeMotion, file);
-        assertThrows(IllegalArgumentException.class, () -> wholeMotion.validateReplay(root, interactions));
+        for (int run = 0; run < 2; run++) {
+            if (run == 1) player.stop();
+            player.playInteraction(root, interactions);
+            assertSame(root, box.getParent());
+            assertFalse(interactions.isHeld(box));
+            assertEquals(startPosition, box.getLocalPosition());
+            assertEquals(0f, player.getCurrentTime());
+            while (!interactions.isHeld(box) && player.isPlaying()) {
+                step(60);
+                player.applyReplayEvents(root, joints, interactions);
+            }
+            assertTrue(interactions.isHeld(box));
+            player.pause();
+            float pausedAt = player.getCurrentTime();
+            player.playInteraction(root, interactions);
+            assertEquals(pausedAt, player.getCurrentTime());
+            assertSame(tool, box.getParent());
+            while (player.isPlaying()) {
+                step(60);
+                player.applyReplayEvents(root, joints, interactions);
+            }
+            assertTrue(ObjectInteractionController.objectCenter(box).y - startPosition.y >= .094f);
+        }
         interactions.release(root, "box");
         box.getLocalPosition().set(startPosition);
         AiActionExecutor.processAndExecute("{\"pose\":\"home\"}", joints, player, root, interactions, task);
@@ -86,9 +108,8 @@ class GraspLiftSequenceTest {
         var loaded = MotionSequenceIO.load(file);
         assertEquals(wholeMotion.getEvents(), loaded.getEvents());
         assertEquals(wholeMotion.getKeyframes().size(), loaded.getKeyframes().size());
-        loaded.validateReplay(root, interactions);
         player.loadSequence(loaded);
-        player.play();
+        player.playInteraction(root, interactions);
         for (int frame = 0; frame < 1500 && player.isPlaying(); frame++) {
             step(60);
             player.applyReplayEvents(root, joints, interactions);
@@ -96,6 +117,31 @@ class GraspLiftSequenceTest {
         assertFalse(player.isReplayingEvents());
         assertSame(tool, box.getParent());
         assertTrue(box.getWorldTransform().getTranslation(new Vector3f()).y - startPosition.y >= .094f);
+    }
+
+    @Test void slowFrameAfterCaptureStillShowsIntermediateLiftPoses() {
+        float startY = ObjectInteractionController.objectCenter(box).y;
+        float height = .1f;
+        task.start(root, joints, interactions, player, "box", "tool", new Vector3f(), height, true);
+        float normalFrame = 1f / 60;
+        int risingFrames = 0;
+        for (int frame = 0; frame < 1500 && task.isActive(); frame++) {
+            collisions.beginStep(root, joints);
+            String event = interactions.update(normalFrame, root, false);
+            task.update(root, false, event);
+            boolean capturedNow = event != null && interactions.isHeld(box);
+            float before = ObjectInteractionController.objectCenter(box).y;
+            if (capturedNow) assertEquals(startY, before, .00001f);
+            player.updateFromRenderFrame(capturedNow ? .6f : normalFrame, joints);
+            assertNull(collisions.validateAndCommit(root, joints));
+            float rise = ObjectInteractionController.objectCenter(box).y - before;
+            if (rise > .000001f) risingFrames++;
+            assertTrue(rise < height * .15f, "Single-frame rise: " + rise);
+        }
+        assertFalse(task.isActive());
+        assertTrue(interactions.isHeld(box));
+        assertTrue(risingFrames > 10, "Expected a gradual lift, got " + risingFrames + " moving frames");
+        assertEquals(startY + height, ObjectInteractionController.objectCenter(box).y, .006f);
     }
 
     @Test void splitAiReplyDoesNotExecuteItsFirstPart() {

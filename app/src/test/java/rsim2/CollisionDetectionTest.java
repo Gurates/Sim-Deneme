@@ -213,6 +213,32 @@ public class CollisionDetectionTest {
     }
 
     @Test
+    public void robotContactPermissionAppliesOnlyToTheSelectedObjectAndItsGeometry() {
+        CollisionWorld world = new CollisionWorld();
+        SceneNode robot = new SceneNode("robot");
+        robot.getLocalPosition().y = 2;
+        robot.addMesh(createTestCubeMesh(.5f));
+        SceneNode box = new SceneNode("box");
+        box.setRobotPart(false);
+        robot.addChild(box);
+        SceneNode part = new SceneNode("part");
+        box.addChild(part);
+        part.addMesh(createTestCubeMesh(.5f));
+
+        assertTrue(world.update(robot, List.of()).hasCollision());
+        box.setRobotContactAllowed(true);
+        assertFalse(world.update(robot, List.of()).hasCollision());
+        SceneNode other = new SceneNode("box");
+        other.setRobotPart(false);
+        other.addMesh(createTestCubeMesh(.5f));
+        robot.addChild(other);
+        assertTrue(world.getFilter().shouldCheckPair(robot, other, List.of()));
+        assertTrue(world.getFilter().shouldCheckPair(part, other, List.of()));
+        box.setRobotContactAllowed(false);
+        assertTrue(world.getFilter().shouldCheckPair(part, robot, List.of()));
+    }
+
+    @Test
     public void testOfflineTrajectoryValidation() {
         CollisionWorld world = new CollisionWorld();
         SceneNode root = new SceneNode("root");

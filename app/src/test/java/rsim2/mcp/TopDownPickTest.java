@@ -73,6 +73,8 @@ class TopDownPickTest {
     }
 
     @Test void pausingAndResumingAnIncompletePickPreservesTheCaptureEvent() {
+        ObjectInteractionController replayInteractions = new ObjectInteractionController();
+        robot.useInteractions(root, replayInteractions);
         String taskId = call("pick_object_top_down", arguments).get("task_id").getAsString();
         player.update(robot.limitDelta(.01f, player), joints);
         assertTrue(robot.pauseTask(player, joints));
@@ -90,6 +92,13 @@ class TopDownPickTest {
         assertEquals(taskId, completed.get("task_id").getAsString());
         assertEquals("completed", completed.get("state").getAsString());
         assertSame(tool, box.getParent());
+        player.playInteraction(root, replayInteractions);
+        assertSame(root, box.getParent());
+        while (player.isPlaying()) {
+            player.update(100, joints);
+            player.applyReplayEvents(root, joints, replayInteractions);
+        }
+        assertTrue(replayInteractions.isHeld(box));
     }
 
     @Test void blockedPickCannotResumeAndReportsItsCollision() {

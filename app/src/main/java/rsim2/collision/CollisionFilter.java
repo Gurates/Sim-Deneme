@@ -99,6 +99,7 @@ public class CollisionFilter {
         if (!enabled || !selfCollisionEnabled) return false;
         if (a == null || b == null || a == b) return false;
         if (a.getMeshes().isEmpty() || b.getMeshes().isEmpty()) return false;
+        if (allowsRobotContact(a.getEnvironmentObject(), b.getEnvironmentObject())) return false;
 
         String idA = a.getId();
         String idB = b.getId();
@@ -114,6 +115,12 @@ public class CollisionFilter {
         }
 
         return true;
+    }
+
+    // A null owner represents robot geometry. Object-to-object collisions still apply.
+    static boolean allowsRobotContact(SceneNode objectA, SceneNode objectB) {
+        if (objectA == null) return objectB != null && objectB.isRobotContactAllowed();
+        return objectB == null && objectA.isRobotContactAllowed();
     }
 
     public static boolean areJointConnected(SceneNode a, SceneNode b, List<Joint> joints, int maxDepth) {
