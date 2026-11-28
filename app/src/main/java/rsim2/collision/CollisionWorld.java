@@ -102,6 +102,7 @@ public class CollisionWorld {
 
         if (filter.isSelfCollisionEnabled()) {
             float margin = filter.getCollisionMargin();
+            List<GraspZone> zones = GraspZone.find(rootNode, joints);
             int n = meshNodes.size();
             for (int i = 0; i < n; i++) {
                 SceneNode nodeA = meshNodes.get(i);
@@ -125,6 +126,11 @@ public class CollisionWorld {
                     }
 
                     if (!aabbA.intersects(aabbB)) {
+                        continue;
+                    }
+
+                    // An object between the jaws, or held by them, touches the gripper by design.
+                    if (!zones.isEmpty() && GraspZone.gripIgnores(zones, nodeA, nodeB)) {
                         continue;
                     }
 

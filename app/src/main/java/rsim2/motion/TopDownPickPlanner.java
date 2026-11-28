@@ -9,7 +9,19 @@ import java.util.*;
 
 
 public final class TopDownPickPlanner {
-    public record TcpWaypoint(Vector3f position, Vector3f direction) {}
+    /**
+     * One step of a Cartesian path. {@code position} may be null to keep the TCP where it is. {@code jointTargets}
+     * (radians) moves joints outside the arm chain, such as gripper jaws, during the same step, so closing or opening
+     * the gripper is part of one continuous trajectory.
+     */
+    public record TcpWaypoint(Vector3f position, Vector3f direction, Map<Joint, Float> jointTargets) {
+        public TcpWaypoint(Vector3f position, Vector3f direction) { this(position, direction, Map.of()); }
+        public TcpWaypoint {
+            jointTargets = jointTargets == null ? Map.of() : Map.copyOf(jointTargets);
+            if (position == null && jointTargets.isEmpty())
+                throw new IllegalArgumentException("A waypoint needs a position, joint targets, or both.");
+        }
+    }
     public record Plan(MotionSequence sequence, float rotateTime, float descendTime, float captureTime,
                        SceneNode object, SceneNode tool, Vector3f offset, Vector3f axis,
                        Matrix4f objectPose, float initialObjectY, float liftDistance) {}
@@ -29,6 +41,17 @@ public final class TopDownPickPlanner {
             }
         }
         if (chain.isEmpty()) throw new IllegalArgumentException("Tool has no movable joints.");
+        for (TcpWaypoint target : waypoints) {
+            for (var entry : target.jointTargets().entrySet()) {
+                Joint joint = entry.getKey();
+                if (!joints.contains(joint)) throw new IllegalArgumentException("Unknown joint in waypoint.");
+                if (chain.contains(joint)) throw new IllegalArgumentException(joint.getId()
+                        + " moves the TCP and is solved from positions; set targets only for other joints such as jaws.");
+                float angle = entry.getValue();
+                if (!Float.isFinite(angle) || angle < joint.getMinLimit() - 1e-4f || angle > joint.getMaxLimit() + 1e-4f)
+                    throw new IllegalArgumentException("Target outside the limits of " + joint.getId());
+            }
+        }
         float[] initial = JointMotion.angles(joints);
         time = 0;
         motion = new MotionSequence("MCP Cartesian trajectory", .01f, false);
@@ -37,20 +60,33 @@ public final class TopDownPickPlanner {
             key(joints, 0);
             for (TcpWaypoint target : waypoints) {
                 Vector3f from = point(tool, offset);
+                Vector3f goal = target.position() == null ? new Vector3f(from) : target.position();
                 Vector3f facing = axis == null ? null : direction(tool, axis);
                 Vector3f endDirection = target.direction() == null ? facing : target.direction();
                 Quaternionf rotation = facing == null ? null : new Quaternionf().rotationTo(facing, endDirection);
-                float length = from.distance(target.position());
+                Map<Joint, Float> jointStart = new LinkedHashMap<>();
+                float jointTravel = 0;
+                for (var entry : target.jointTargets().entrySet()) {
+                    jointStart.put(entry.getKey(), entry.getKey().getCurrentAngleRadians());
+                    jointTravel = Math.max(jointTravel, Math.abs(entry.getValue() - entry.getKey().getCurrentAngleRadians()));
+                }
+                float length = from.distance(goal);
                 if (!Float.isFinite(length)) throw new IllegalArgumentException("Invalid Cartesian path length.");
                 float radians = facing == null ? 0 : (float) Math.acos(Math.max(-1, Math.min(1, facing.dot(endDirection))));
-                int steps = Math.max(1, Math.max((int) Math.ceil(length / .05f), (int) Math.ceil(radians / .15f)));
+                int steps = Math.max(1, Math.max((int) Math.ceil(length / .05f),
+                        Math.max((int) Math.ceil(radians / .15f), (int) Math.ceil(jointTravel / .15f))));
                 if (steps > 240) throw new IllegalArgumentException("Cartesian segment is too long. Add intermediate waypoints.");
                 for (int i = 1; i <= steps; i++) {
                     float fraction = i / (float) steps;
                     Vector3f desired = rotation == null ? null
                             : new Quaternionf().slerp(rotation, fraction).transform(new Vector3f(facing));
+                    Map<Joint, Float> extra = new LinkedHashMap<>();
+                    for (var entry : target.jointTargets().entrySet()) {
+                        float start = jointStart.get(entry.getKey());
+                        extra.put(entry.getKey(), start + (entry.getValue() - start) * fraction);
+                    }
                     waypoint(root, joints, chain, tool, offset, axis,
-                            new Vector3f(from).lerp(target.position(), fraction), desired);
+                            new Vector3f(from).lerp(goal, fraction), desired, extra);
                 }
             }
             motion.setDurationSeconds(time);
@@ -130,7 +166,13 @@ public final class TopDownPickPlanner {
 
     private void waypoint(SceneNode root, List<Joint> joints, List<Joint> chain, SceneNode tool,
                           Vector3f offset, Vector3f axis, Vector3f target, Vector3f targetAxis) {
+        waypoint(root, joints, chain, tool, offset, axis, target, targetAxis, Map.of());
+    }
+
+    private void waypoint(SceneNode root, List<Joint> joints, List<Joint> chain, SceneNode tool,
+                          Vector3f offset, Vector3f axis, Vector3f target, Vector3f targetAxis, Map<Joint, Float> extra) {
         float[] previous = JointMotion.angles(joints);
+        extra.forEach(Joint::setAngle);
         solve(chain, tool, offset, axis, target, targetAxis);
         if (System.nanoTime() > deadline) throw new IllegalArgumentException("Pick planning timed out; no motion applied.");
         float[] next = JointMotion.angles(joints);

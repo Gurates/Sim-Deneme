@@ -783,6 +783,72 @@ public class ObjectInteractionController {
 
     public boolean hasPendingGrasp() { return pendingObject != null; }
 
+    private static final float RELEASE_OPENING = (float) Math.toRadians(3);
+    private record Grip(SceneNode object, Joint jaw, float angle, float closingSign) {}
+    private final Map<Joint, Float> lastJawAngles = new IdentityHashMap<>();
+    private final Map<SceneNode, Grip> grips = new IdentityHashMap<>();
+
+    public List<String> updateGripping(SceneNode root, List<Joint> joints) {
+        List<String> events = new ArrayList<>();
+        grips.keySet().removeIf(object -> !originalParents.containsKey(object) || !isAncestor(root, object));
+        for (rsim2.collision.GraspZone zone : rsim2.collision.GraspZone.find(root, joints)) {
+            for (Joint jaw : zone.getJaws()) {
+                float angle = jaw.getCurrentAngleRadians();
+                Float last = lastJawAngles.put(jaw, angle);
+                Grip grip = gripOf(jaw);
+                if (grip != null) {
+                    float opened = (grip.angle - angle) * grip.closingSign;
+                    if (opened < 0) {
+                        // Keep the jaw on the object's surface instead of closing through it.
+                        holdJaw(jaw, grip.angle);
+                        lastJawAngles.put(jaw, grip.angle);
+                    } else if (opened > RELEASE_OPENING) {
+                        grips.remove(grip.object);
+                        events.add(release(root, grip.object.getId()) + " (jaw " + jaw.getId() + " opened)");
+                    }
+                    continue;
+                }
+                if (last == null || Math.abs(angle - last) < 1e-6f || holdsAny(zone)) continue;
+                for (SceneNode object : objects(root)) {
+                    if (originalParents.containsKey(object) || !zone.contains(object) || !zone.jawTouches(jaw, object)) continue;
+                    SceneNode oldParent = object.getParent();
+                    if (!reparentChecked(object, zone.getTool(), () -> true)) continue;
+                    originalParents.put(object, oldParent);
+                    grips.put(object, new Grip(object, jaw, angle, Math.signum(angle - last)));
+                    holdJaw(jaw, angle);
+                    events.add(String.format(Locale.ROOT,
+                            "Gripped %s with %s (jaw %s stopped at %.1f degrees). It now moves with the gripper; open the jaw to release it.",
+                            object.getId(), zone.getTool().getId(), jaw.getId(), Math.toDegrees(angle)));
+                    break;
+                }
+            }
+        }
+        return events;
+    }
+
+    public SceneNode grippedBy(Joint jaw) {
+        Grip grip = gripOf(jaw);
+        return grip == null ? null : grip.object;
+    }
+
+    private Grip gripOf(Joint jaw) {
+        for (Grip grip : grips.values()) if (grip.jaw == jaw) return grip;
+        return null;
+    }
+
+    private boolean holdsAny(rsim2.collision.GraspZone zone) {
+        for (SceneNode object : originalParents.keySet()) if (zone.isGripperPart(object.getParent())) return true;
+        return false;
+    }
+
+    private static void holdJaw(Joint jaw, float angle) {
+        jaw.setAngle(angle);
+        if (jaw.getMotor() != null) {
+            jaw.getMotor().setTargetAngleRadians(angle);
+            jaw.getMotor().setCurrentVelocity(0);
+        }
+    }
+
     private void clearPending() {
         pendingObject = null;
         pendingTool = null;
