@@ -173,6 +173,35 @@ class GraspZoneTest {
         assertSame(palm, box.getParent(), "Still held after the carry");
         assertTrue(ObjectInteractionController.objectCenter(box).distance(boxStart) > .3f, "The box was carried");
 
+        // Pressing Play replays the recorded scene: box back in place, robot at the first frame, same pick again.
+        Vector3f carriedTo = ObjectInteractionController.objectCenter(box);
+        float[] endPose = rsim2.motion.JointMotion.angles(joints);
+        assertTrue(player.restoresObjectsOnReplay());
+        assertTrue(player.startsNewPlayback());
+        player.playInteraction(root, interactions);
+        player.rewindToStart(joints);
+        state = new rsim2.collision.MotionCollisionState();
+        state.beginStep(root, joints);
+        assertSame(root, box.getParent(), "Replay starts with the box released");
+        assertTrue(ObjectInteractionController.objectCenter(box).distance(boxStart) < 1e-4f, "and back where it was");
+        assertEquals(.5f, shoulder.getCurrentAngleRadians(), 1e-4, "Robot rewound to the first frame");
+        events.clear();
+        for (int frame = 0; frame < 3000 && player.isPlaying(); frame++) {
+            state.beginStep(root, joints);
+            player.update(1 / 60f, joints);
+            assertNull(state.validateAndCommit(root, joints), "The replay must not be blocked");
+            events.addAll(interactions.updateGripping(root, joints));
+        }
+        assertEquals(1, events.size(), events.toString());
+        assertTrue(events.get(0).startsWith("Gripped box"), events.get(0));
+        assertSame(palm, box.getParent());
+        assertTrue(ObjectInteractionController.objectCenter(box).distance(carriedTo) < .01f, "The replay repeats the carry");
+        for (int i = 0; i < joints.size(); i++) {
+            // The jaw stops wherever the frame that first touches the box lands, so allow a couple of degrees.
+            double tolerance = joints.get(i) == jaw ? Math.toRadians(2) : 1e-3;
+            assertEquals(endPose[i], joints.get(i).getCurrentAngleRadians(), tolerance, joints.get(i).getId());
+        }
+
         // Put it back with one call: return, open the jaw, move away. It must release once and stay released.
         String back = String.format(java.util.Locale.ROOT, """
                 {"tool":"palm","tool_offset":[%f,%f,%f],"waypoints":[
@@ -181,7 +210,21 @@ class GraspZoneTest {
                   {"position":[%f,%f,%f]}]}""",
                 graspLocal.x, graspLocal.y, graspLocal.z,
                 positions[0].x, positions[0].y, positions[0].z, positions[1].x, positions[1].y, positions[1].z);
+        // Idle frames between calls, as in the engine: motors keep running and the grip keeps holding.
+        for (int frame = 0; frame < 120; frame++) {
+            state.beginStep(root, joints);
+            for (Joint joint : joints) joint.getMotor().update(1 / 60f);
+            state.validateAndCommit(root, joints);
+            interactions.updateGripping(root, joints);
+            mcp.afterStep(root, joints, player, null);
+        }
+        float[] before = rsim2.motion.JointMotion.angles(joints);
         mcp.execute("move_tcp", com.google.gson.JsonParser.parseString(back).getAsJsonObject(), root, joints, player, false, () -> {});
+        var firstFrame = player.getSequence().getKeyframes().get(0);
+        for (int i = 0; i < joints.size(); i++) {
+            assertEquals(Math.toDegrees(before[i]), firstFrame.getJointAngle(joints.get(i).getId()), .01,
+                    "The second call must start from the current pose: " + joints.get(i).getId());
+        }
         events.clear();
         for (int frame = 0; frame < 3000 && player.isPlaying(); frame++) {
             state.beginStep(root, joints);

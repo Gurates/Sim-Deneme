@@ -263,6 +263,9 @@ public final class McpRobotController {
             player.loadSequence(sequence);
             if (pick != null) player.rememberInteractionStart(pick.object(), interactions);
             for (var event : events) player.rememberInteractionStart(event.object(), interactions);
+            // Jaw grips are not recorded as events, so remember every object for a faithful replay.
+            if (advancedTrajectory) for (SceneNode object : ObjectInteractionController.objects(root))
+                player.rememberInteractionStart(object, interactions);
             player.setPlaybackSpeed(1);
             player.play();
         }

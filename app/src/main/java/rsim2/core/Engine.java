@@ -474,7 +474,7 @@ public class Engine {
         if (sequence.isIncomplete() && !aiBusy && !canReplayInteractions()) {
             return "Clear E-stop and disable Sim2Real sync before previewing the motion.";
         }
-        if (!sequence.isIncomplete() && !sequence.getEvents().isEmpty() && !canReplayInteractions())
+        if (motionPlayer.restoresObjectsOnReplay() && !canReplayInteractions())
             return "Clear E-stop and disable Sim2Real sync before replaying interactions.";
         return null;
     }
@@ -508,8 +508,16 @@ public class Engine {
             motionPlayer.playIncompletePreview();
             return;
         }
-        if (!sequence.getEvents().isEmpty() && !sequence.isIncomplete()) {
+        if (motionPlayer.restoresObjectsOnReplay()) {
+            boolean fromStart = motionPlayer.startsNewPlayback();
             motionPlayer.playInteraction(rootNode, aiPanel.getObjectInteractions());
+            if (fromStart) {
+                // Replay the recorded scene: objects are back in place, now put the robot at the first frame
+                // instead of sweeping it there (with whatever it held) under collision checks.
+                motionPlayer.rewindToStart(joints);
+                motionCollisionState = new MotionCollisionState();
+                motionCollisionState.beginStep(rootNode, joints);
+            }
             return;
         }
         motionPlayer.play();

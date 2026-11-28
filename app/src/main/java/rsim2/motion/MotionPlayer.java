@@ -169,6 +169,21 @@ public class MotionPlayer {
         interactionStart.computeIfAbsent(object, interactions::replayPose);
     }
 
+    /**
+     * True when replaying this motion from the start must first put scene objects back where they were when it was
+     * recorded, for example because the robot gripped and carried them with its jaws.
+     */
+    public boolean restoresObjectsOnReplay() {
+        return hasSequence() && !sequence.isIncomplete() && (!sequence.getEvents().isEmpty() || !interactionStart.isEmpty());
+    }
+
+    /** Jump straight to the first frame, as a rewind before a replay. The caller resets its collision baseline. */
+    public void rewindToStart(List<Joint> joints) {
+        bindJoints(joints);
+        currentTime = 0.0f;
+        applyCurrentFrame(joints);
+    }
+
     public void playInteraction(SceneNode root, ObjectInteractionController interactions) {
         if (startsNewPlayback()) {
             sequence.validateReplay(root, object -> {
